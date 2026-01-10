@@ -1,0 +1,23 @@
+# Test files
+test/
+*.test.ts
+coverage/
+.nyc_output/
+
+# Configuration files
+tsconfig.json
+.env
+.env.*
+
+# Development files
+*.log
+*.tmp
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore

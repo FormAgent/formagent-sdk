@@ -1,0 +1,85 @@
+{
+  "name": "formagent-sdk",
+  "version": "0.1.1",
+  "description": "FormAgent SDK - AI Agent framework with streaming support, tool execution, skill management, and hooks system",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "formagent": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": "./dist/types/index.js",
+    "./tools": "./dist/tools/index.js",
+    "./skills": "./dist/skills/loader.js",
+    "./hooks": "./dist/hooks/index.js",
+    "./session": "./dist/session/index.js",
+    "./llm": "./dist/llm/index.js",
+    "./cost": "./dist/cost/index.js",
+    "./prompt": "./dist/prompt/index.js",
+    "./cli": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "examples",
+    "docs/*.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run build:sdk && bun run build:cli",
+    "build:sdk": "bun build ./src/index.ts --outdir ./dist --target node",
+    "build:cli": "bun build ./src/cli/index.ts --outdir ./dist/cli --target node && chmod +x ./dist/cli/index.js",
+    "build:types": "tsc --emitDeclarationOnly --declaration --outDir dist",
+    "dev": "bun build ./src/index.ts --outdir ./dist --target node --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run clean && bun run build",
+    "cli": "bun run ./src/cli/index.ts"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.5",
+    "bun-types": "^1.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "claude",
+    "anthropic",
+    "openai",
+    "tools",
+    "streaming",
+    "typescript",
+    "skills",
+    "hooks",
+    "formagent-sdk"
+  ],
+  "author": "FormAgent Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/formagent/formagent-sdk"
+  },
+  "homepage": "https://github.com/formagent/formagent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/formagent/formagent-sdk/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
