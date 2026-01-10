@@ -26,9 +26,6 @@
   },
   "files": [
     "dist",
-    "src",
-    "examples",
-    "docs/*.md",
     "README.md",
     "LICENSE"
   ],
