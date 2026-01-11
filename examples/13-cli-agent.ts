@@ -153,6 +153,7 @@ function printHelp() {
   console.log(`  ${c.cyan("/skills")}   - List available skills`)
   console.log(`  ${c.cyan("/todos")}    - Show current todo list`)
   console.log(`  ${c.cyan("/usage")}    - Show token usage statistics`)
+  console.log(`  ${c.cyan("/debug")}    - Show debug info (prompt, model, env)`)
   console.log(`  ${c.cyan("/exit")}     - Exit the CLI`)
   console.log()
   console.log(c.dim("  Or just type your message to chat with the assistant."))
@@ -245,6 +246,79 @@ function printUsage() {
   const inputCost = (totalInputTokens / 1_000_000) * 3
   const outputCost = (totalOutputTokens / 1_000_000) * 15
   console.log(`  ${c.cyan("Est. cost:")}     $${(inputCost + outputCost).toFixed(4)}`)
+  console.log()
+}
+
+/**
+ * Print debug information
+ */
+function printDebug() {
+  const model = getDefaultModel()
+  const systemPrompt = buildSystemPrompt()
+  const cwd = process.cwd()
+
+  console.log()
+  console.log(c.bold("═══════════════════════════════════════════════════════════"))
+  console.log(c.bold("                    DEBUG INFORMATION                       "))
+  console.log(c.bold("═══════════════════════════════════════════════════════════"))
+  console.log()
+
+  // Model info
+  console.log(c.bold("Model:"))
+  console.log(`  ${c.cyan("Current:")}        ${model}`)
+  console.log(`  ${c.cyan("ANTHROPIC_MODEL:")} ${process.env.ANTHROPIC_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("OPENAI_MODEL:")}    ${process.env.OPENAI_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("OPENAI_BASE_URL:")} ${process.env.OPENAI_BASE_URL || c.dim("(not set)")}`)
+  console.log()
+
+  // API Keys (masked)
+  console.log(c.bold("API Keys:"))
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const openaiKey = process.env.OPENAI_API_KEY
+  console.log(`  ${c.cyan("ANTHROPIC_API_KEY:")} ${anthropicKey ? c.green("✓ set") + c.dim(` (${anthropicKey.slice(0, 8)}...${anthropicKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log(`  ${c.cyan("OPENAI_API_KEY:")}    ${openaiKey ? c.green("✓ set") + c.dim(` (${openaiKey.slice(0, 8)}...${openaiKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log()
+
+  // Environment
+  console.log(c.bold("Environment:"))
+  console.log(`  ${c.cyan("Working dir:")}  ${cwd}`)
+  console.log(`  ${c.cyan("Git repo:")}     ${isGitRepo(cwd) ? c.green("Yes") : "No"}`)
+  console.log(`  ${c.cyan("Platform:")}     ${process.platform}`)
+  console.log(`  ${c.cyan("OS Version:")}   ${getOsVersion()}`)
+  console.log(`  ${c.cyan("Shell:")}        ${process.env.SHELL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("Skills path:")}  ${SKILLS_PATH}`)
+  console.log()
+
+  // Tools
+  const toolNames = builtinTools.map(t => t.name)
+  toolNames.push("Skill") // Add Skill tool
+  console.log(c.bold("Tools:") + c.dim(` (${toolNames.length} total)`))
+  console.log(`  ${toolNames.join(", ")}`)
+  console.log()
+
+  // Session state
+  console.log(c.bold("Session State:"))
+  console.log(`  ${c.cyan("Active:")}         ${session ? c.green("Yes") : "No"}`)
+  console.log(`  ${c.cyan("Messages:")}       ${messageCount}`)
+  console.log(`  ${c.cyan("Input tokens:")}   ${totalInputTokens.toLocaleString()}`)
+  console.log(`  ${c.cyan("Output tokens:")}  ${totalOutputTokens.toLocaleString()}`)
+  console.log()
+
+  // System prompt
+  console.log(c.bold("System Prompt:") + c.dim(` (${systemPrompt.length} chars)`))
+  console.log(c.dim("─".repeat(60)))
+  // Show truncated prompt with line numbers
+  const promptLines = systemPrompt.split("\n")
+  const maxLines = 50
+  for (let i = 0; i < Math.min(promptLines.length, maxLines); i++) {
+    const lineNum = String(i + 1).padStart(3, " ")
+    const line = promptLines[i].slice(0, 75)
+    console.log(`${c.dim(lineNum + "│")} ${line}${promptLines[i].length > 75 ? c.dim("...") : ""}`)
+  }
+  if (promptLines.length > maxLines) {
+    console.log(c.dim(`    ... (${promptLines.length - maxLines} more lines)`))
+  }
+  console.log(c.dim("─".repeat(60)))
   console.log()
 }
 
@@ -383,6 +457,10 @@ async function handleInput(input: string): Promise<boolean> {
 
       case "/usage":
         printUsage()
+        return true
+
+      case "/debug":
+        printDebug()
         return true
 
       case "/exit":
