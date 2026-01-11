@@ -1,6 +1,6 @@
 {
   "name": "formagent-sdk",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "FormAgent SDK - AI Agent framework with streaming support, tool execution, skill management, and hooks system",
   "type": "module",
   "main": "./dist/index.js",
