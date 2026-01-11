@@ -36,9 +36,15 @@ export {
   builtinTools,
   fileTools,
   webTools,
+  apiTools,
+  interactiveTools,
+  utilityTools,
   createBuiltinTools,
   createFileTools,
   createWebTools,
+  createApiTools,
+  createInteractiveTools,
+  createUtilityTools,
   // Individual tools
   BashTool,
   ReadTool,
@@ -48,7 +54,10 @@ export {
   GrepTool,
   WebFetchTool,
   WebSearchTool,
+  HttpRequestTool,
   TodoWriteTool,
+  AskUserTool,
+  BatchTool,
   // Tool factories
   createBashTool,
   createReadTool,
@@ -58,12 +67,22 @@ export {
   createGrepTool,
   createWebFetchTool,
   createWebSearchTool,
+  createHttpRequestTool,
   createTodoWriteTool,
+  createAskUserTool,
+  createBatchTool,
   // Todo utilities
   getTodos,
   clearTodos,
   setTodoChangeCallback,
+  // AskUser utilities
+  setAskUserHandler,
+  getAskUserHandler,
+  // Batch utilities
+  setBatchToolResolver,
+  getBatchToolResolver,
 } from "./builtin"
+export type { AskUserHandler, AskUserAnswer, BatchToolResolver, BatchCallResult } from "./builtin"
 
 // Skill tool
 export {
@@ -86,6 +105,13 @@ export type {
   GrepInput,
   WebFetchInput,
   WebSearchInput,
+  HttpMethod,
+  HttpRequestInput,
   TodoItem,
   TodoWriteInput,
+  AskUserOption,
+  AskUserQuestion,
+  AskUserInput,
+  BatchToolCall,
+  BatchInput,
 } from "./builtin"

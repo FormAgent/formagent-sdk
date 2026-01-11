@@ -151,6 +151,83 @@ export interface TodoWriteInput {
 }
 
 /**
+ * AskUser question option
+ */
+export interface AskUserOption {
+  /** Display label for the option */
+  label: string
+  /** Description of what this option means */
+  description?: string
+  /** Value to return if selected (defaults to label) */
+  value?: string
+}
+
+/**
+ * AskUser question definition
+ */
+export interface AskUserQuestion {
+  /** The question text to display to the user */
+  question: string
+  /** Short label for the question */
+  header?: string
+  /** Available options for the user to choose from */
+  options?: AskUserOption[]
+  /** Allow multiple selections (default: false) */
+  multiSelect?: boolean
+  /** Default value if user doesn't respond */
+  defaultValue?: string
+}
+
+/**
+ * AskUser tool input
+ */
+export interface AskUserInput {
+  /** Questions to ask the user (1-4 questions) */
+  questions: AskUserQuestion[]
+}
+
+/**
+ * Single tool call in a batch
+ */
+export interface BatchToolCall {
+  /** Name of the tool to execute */
+  tool: string
+  /** Parameters for the tool */
+  parameters: Record<string, unknown>
+}
+
+/**
+ * Batch tool input
+ */
+export interface BatchInput {
+  /** Array of tool calls to execute in parallel (max 10) */
+  tool_calls: BatchToolCall[]
+}
+
+/**
+ * HTTP request method
+ */
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+
+/**
+ * HttpRequest tool input
+ */
+export interface HttpRequestInput {
+  /** HTTP method */
+  method: HttpMethod
+  /** URL to request */
+  url: string
+  /** Request headers */
+  headers?: Record<string, string>
+  /** Request body (for POST/PUT/PATCH) */
+  body?: unknown
+  /** Request timeout in milliseconds (default: 30000) */
+  timeout?: number
+  /** Expected response type: 'json' | 'text' | 'binary' */
+  responseType?: "json" | "text" | "binary"
+}
+
+/**
  * Built-in tool factory options
  */
 export interface BuiltinToolOptions {

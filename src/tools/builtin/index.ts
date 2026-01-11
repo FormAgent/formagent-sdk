@@ -17,6 +17,13 @@ export type {
   WebSearchInput,
   TodoItem,
   TodoWriteInput,
+  AskUserOption,
+  AskUserQuestion,
+  AskUserInput,
+  BatchToolCall,
+  BatchInput,
+  HttpMethod,
+  HttpRequestInput,
 } from "./types"
 
 // Individual tool exports
@@ -35,6 +42,21 @@ export {
   clearTodos,
   setTodoChangeCallback,
 } from "./todo"
+export {
+  AskUserTool,
+  createAskUserTool,
+  setAskUserHandler,
+  getAskUserHandler,
+} from "./askuser"
+export type { AskUserHandler, AskUserAnswer } from "./askuser"
+export {
+  BatchTool,
+  createBatchTool,
+  setBatchToolResolver,
+  getBatchToolResolver,
+} from "./batch"
+export type { BatchToolResolver, BatchCallResult } from "./batch"
+export { HttpRequestTool, createHttpRequestTool } from "./httprequest"
 
 // Import tools for collection
 import { BashTool } from "./bash"
@@ -46,6 +68,9 @@ import { GrepTool } from "./grep"
 import { WebFetchTool } from "./webfetch"
 import { WebSearchTool } from "./websearch"
 import { TodoWriteTool } from "./todo"
+import { AskUserTool } from "./askuser"
+import { BatchTool } from "./batch"
+import { HttpRequestTool } from "./httprequest"
 
 import type { ToolDefinition } from "../../types/tool"
 import type { BuiltinToolOptions } from "./types"
@@ -59,6 +84,9 @@ import { createGrepTool } from "./grep"
 import { createWebFetchTool } from "./webfetch"
 import { createWebSearchTool } from "./websearch"
 import { createTodoWriteTool } from "./todo"
+import { createAskUserTool } from "./askuser"
+import { createBatchTool } from "./batch"
+import { createHttpRequestTool } from "./httprequest"
 
 /**
  * Collection of all built-in tools (default instances)
@@ -82,7 +110,10 @@ export const builtinTools: ToolDefinition[] = [
   GrepTool,
   WebFetchTool,
   WebSearchTool,
+  HttpRequestTool,
   TodoWriteTool,
+  AskUserTool,
+  BatchTool,
 ]
 
 /**
@@ -109,7 +140,32 @@ export const fileTools: ToolDefinition[] = [
  * })
  * ```
  */
-export const webTools: ToolDefinition[] = [WebFetchTool, WebSearchTool]
+export const webTools: ToolDefinition[] = [WebFetchTool, WebSearchTool, HttpRequestTool]
+
+/**
+ * API and HTTP tools for external service integration
+ *
+ * @example
+ * ```ts
+ * import { apiTools } from "formagent-sdk"
+ *
+ * const session = await createSession({
+ *   model: "claude-sonnet-4-20250514",
+ *   tools: [...fileTools, ...apiTools],
+ * })
+ * ```
+ */
+export const apiTools: ToolDefinition[] = [HttpRequestTool, WebFetchTool, WebSearchTool]
+
+/**
+ * Interactive tools for user communication
+ */
+export const interactiveTools: ToolDefinition[] = [AskUserTool]
+
+/**
+ * Utility tools for orchestration
+ */
+export const utilityTools: ToolDefinition[] = [BatchTool, TodoWriteTool]
 
 /**
  * Create all built-in tools with custom options
@@ -141,7 +197,10 @@ export function createBuiltinTools(options: BuiltinToolOptions = {}): ToolDefini
     createGrepTool(options),
     createWebFetchTool(options),
     createWebSearchTool(options),
+    createHttpRequestTool(options),
     createTodoWriteTool(options),
+    createAskUserTool(options),
+    createBatchTool(options),
   ]
 }
 
@@ -177,5 +236,26 @@ export function createFileTools(options: BuiltinToolOptions = {}): ToolDefinitio
  * ```
  */
 export function createWebTools(options: BuiltinToolOptions = {}): ToolDefinition[] {
-  return [createWebFetchTool(options), createWebSearchTool(options)]
+  return [createWebFetchTool(options), createWebSearchTool(options), createHttpRequestTool(options)]
+}
+
+/**
+ * Create API/HTTP tools with custom options
+ */
+export function createApiTools(options: BuiltinToolOptions = {}): ToolDefinition[] {
+  return [createHttpRequestTool(options), createWebFetchTool(options), createWebSearchTool(options)]
+}
+
+/**
+ * Create interactive tools with custom options
+ */
+export function createInteractiveTools(options: BuiltinToolOptions = {}): ToolDefinition[] {
+  return [createAskUserTool(options)]
+}
+
+/**
+ * Create utility tools with custom options
+ */
+export function createUtilityTools(options: BuiltinToolOptions = {}): ToolDefinition[] {
+  return [createBatchTool(options), createTodoWriteTool(options)]
 }
