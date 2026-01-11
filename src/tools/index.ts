@@ -28,15 +28,17 @@ export {
   createToolManager,
   defaultToolManager,
 } from "./manager"
-export type { ToolManagerOptions, ToolFilter, AllowedToolsSpec } from "./manager"
+export type { ToolManagerOptions, ToolFilter, AllowedToolsSpec, ToolRepairResult } from "./manager"
 
 // Built-in tools
 export {
   // Tool collections
   builtinTools,
   fileTools,
+  webTools,
   createBuiltinTools,
   createFileTools,
+  createWebTools,
   // Individual tools
   BashTool,
   ReadTool,
@@ -45,6 +47,7 @@ export {
   GlobTool,
   GrepTool,
   WebFetchTool,
+  WebSearchTool,
   TodoWriteTool,
   // Tool factories
   createBashTool,
@@ -54,6 +57,7 @@ export {
   createGlobTool,
   createGrepTool,
   createWebFetchTool,
+  createWebSearchTool,
   createTodoWriteTool,
   // Todo utilities
   getTodos,
@@ -81,6 +85,7 @@ export type {
   GlobInput,
   GrepInput,
   WebFetchInput,
+  WebSearchInput,
   TodoItem,
   TodoWriteInput,
 } from "./builtin"

@@ -13,8 +13,41 @@ export * from "./types/index"
 // Utilities
 export * from "./utils"
 
+// Output truncation
+export {
+  truncateOutput,
+  truncateToolOutput,
+  needsTruncation,
+  cleanupTruncatedOutputs,
+  TRUNCATION_DEFAULTS,
+} from "./utils/truncation"
+export type {
+  TruncationConfig,
+  TruncationResult,
+} from "./utils/truncation"
+
 // Session management
 export * from "./session"
+
+// Session compaction
+export {
+  SessionCompactor,
+  createCompactor,
+  pruneToolOutputs,
+  compactMessages,
+  needsCompaction,
+  estimateTokens,
+  estimateMessageTokens,
+  estimateConversationTokens,
+  generateSummaryPrompt,
+  createSummaryMessage,
+  COMPACTION_DEFAULTS,
+} from "./session/compaction"
+export type {
+  CompactionConfig,
+  CompactionResult,
+  TokenEstimate,
+} from "./session/compaction"
 
 // Public API (Claude SDK compatible)
 export {
@@ -25,7 +58,15 @@ export {
   query,
   closeAllSessions,
   setDefaultProvider,
+  setDefaultStorage,
 } from "./api"
+
+// Session Storage implementations
+export {
+  MemorySessionStorage,
+  FileSessionStorage,
+  createSessionStorage,
+} from "./session/storage"
 
 // Tools
 export * from "./tools"

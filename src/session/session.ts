@@ -16,6 +16,7 @@ import type { LLMProvider } from "../types/provider"
 import type { ToolDefinition, ToolContext, ToolOutput } from "../types/tool"
 import { generateSessionId, generateMessageId, generateToolCallId } from "../utils/id"
 import { TypedEventEmitter } from "../utils/events"
+import { truncateToolOutput, needsTruncation } from "../utils/truncation"
 import { HooksManager } from "../hooks/manager"
 import { createSkillTool } from "../tools/skill"
 import { defaultSystemPromptBuilder, defaultClaudeMdLoader } from "../prompt"
@@ -42,6 +43,7 @@ export class SessionImpl implements Session {
   private _state: SessionState
   private provider: LLMProvider
   private tools: Map<string, ToolDefinition>
+  private toolNameLookup: Map<string, string> = new Map() // lowercase -> original name
   private emitter: TypedEventEmitter<SessionEventMap>
   private pendingMessage: SDKMessage | null = null
   private isReceiving = false
@@ -49,6 +51,7 @@ export class SessionImpl implements Session {
   private closed = false
   private hooksManager: HooksManager | null = null
   private maxTurns: number | undefined
+  private enableToolRepair: boolean = true
 
   constructor(
     id: string,
@@ -82,6 +85,7 @@ export class SessionImpl implements Session {
     if (config.tools) {
       for (const tool of config.tools) {
         this.tools.set(tool.name, tool)
+        this.toolNameLookup.set(tool.name.toLowerCase(), tool.name)
       }
     }
 
@@ -92,6 +96,7 @@ export class SessionImpl implements Session {
         cwd: config.cwd,
       })
       this.tools.set(skillTool.name, skillTool)
+      this.toolNameLookup.set(skillTool.name.toLowerCase(), skillTool.name)
     }
 
     // Apply allowed tools filter (after all tools are registered)
@@ -518,13 +523,28 @@ export class SessionImpl implements Session {
       systemMessage = preResult.systemMessage
     }
 
-    const tool = this.tools.get(block.name)
+    // Try to get tool with case-insensitive matching
+    let tool = this.tools.get(block.name)
+    let effectiveToolName = block.name
+
+    if (!tool && this.enableToolRepair) {
+      // Try case-insensitive lookup
+      const lowerName = block.name.toLowerCase()
+      const originalName = this.toolNameLookup.get(lowerName)
+      if (originalName) {
+        tool = this.tools.get(originalName)
+        effectiveToolName = originalName
+      }
+    }
 
     if (!tool) {
+      // Provide helpful error with available tools
+      const availableTools = Array.from(this.tools.keys()).slice(0, 10)
+      const suffix = this.tools.size > 10 ? ` (and ${this.tools.size - 10} more)` : ""
       return {
         type: "tool_result",
         tool_use_id: block.id,
-        content: `Error: Tool "${block.name}" not found`,
+        content: `Error: Tool "${block.name}" not found. Available tools: ${availableTools.join(", ")}${suffix}`,
         is_error: true,
         _hookSystemMessage: systemMessage,
       }
@@ -540,7 +560,13 @@ export class SessionImpl implements Session {
 
     try {
       const toolResult = await tool.execute(toolInput, context)
-      const content = typeof toolResult.content === "string" ? toolResult.content : JSON.stringify(toolResult.content)
+      let content = typeof toolResult.content === "string" ? toolResult.content : JSON.stringify(toolResult.content)
+
+      // Apply output truncation to prevent token explosion
+      if (needsTruncation(content)) {
+        content = await truncateToolOutput(content)
+      }
+
       toolResponse = toolResult
 
       result = {

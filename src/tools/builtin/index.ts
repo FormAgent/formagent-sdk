@@ -14,6 +14,7 @@ export type {
   GlobInput,
   GrepInput,
   WebFetchInput,
+  WebSearchInput,
   TodoItem,
   TodoWriteInput,
 } from "./types"
@@ -26,6 +27,7 @@ export { EditTool, createEditTool } from "./edit"
 export { GlobTool, createGlobTool } from "./glob"
 export { GrepTool, createGrepTool } from "./grep"
 export { WebFetchTool, createWebFetchTool } from "./webfetch"
+export { WebSearchTool, createWebSearchTool } from "./websearch"
 export {
   TodoWriteTool,
   createTodoWriteTool,
@@ -42,6 +44,7 @@ import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { WebFetchTool } from "./webfetch"
+import { WebSearchTool } from "./websearch"
 import { TodoWriteTool } from "./todo"
 
 import type { ToolDefinition } from "../../types/tool"
@@ -54,6 +57,7 @@ import { createEditTool } from "./edit"
 import { createGlobTool } from "./glob"
 import { createGrepTool } from "./grep"
 import { createWebFetchTool } from "./webfetch"
+import { createWebSearchTool } from "./websearch"
 import { createTodoWriteTool } from "./todo"
 
 /**
@@ -77,6 +81,7 @@ export const builtinTools: ToolDefinition[] = [
   GlobTool,
   GrepTool,
   WebFetchTool,
+  WebSearchTool,
   TodoWriteTool,
 ]
 
@@ -90,6 +95,21 @@ export const fileTools: ToolDefinition[] = [
   GlobTool,
   GrepTool,
 ]
+
+/**
+ * Web-related tools (fetch and search)
+ *
+ * @example
+ * ```ts
+ * import { webTools } from "formagent-sdk"
+ *
+ * const session = await createSession({
+ *   model: "claude-sonnet-4-20250514",
+ *   tools: [...fileTools, ...webTools],
+ * })
+ * ```
+ */
+export const webTools: ToolDefinition[] = [WebFetchTool, WebSearchTool]
 
 /**
  * Create all built-in tools with custom options
@@ -120,6 +140,7 @@ export function createBuiltinTools(options: BuiltinToolOptions = {}): ToolDefini
     createGlobTool(options),
     createGrepTool(options),
     createWebFetchTool(options),
+    createWebSearchTool(options),
     createTodoWriteTool(options),
   ]
 }
@@ -135,4 +156,26 @@ export function createFileTools(options: BuiltinToolOptions = {}): ToolDefinitio
     createGlobTool(options),
     createGrepTool(options),
   ]
+}
+
+/**
+ * Create web-related tools with custom options
+ *
+ * @param options - Tool configuration options
+ * @returns Array of configured web tool definitions
+ *
+ * @example
+ * ```ts
+ * const webTools = createWebTools({
+ *   allowPrivateNetwork: false,
+ * })
+ *
+ * const session = await createSession({
+ *   model: "claude-sonnet-4-20250514",
+ *   tools: [...fileTools, ...webTools],
+ * })
+ * ```
+ */
+export function createWebTools(options: BuiltinToolOptions = {}): ToolDefinition[] {
+  return [createWebFetchTool(options), createWebSearchTool(options)]
 }

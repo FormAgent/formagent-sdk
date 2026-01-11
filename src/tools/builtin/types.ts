@@ -106,6 +106,31 @@ export interface WebFetchInput {
 }
 
 /**
+ * WebSearch tool input
+ */
+export interface WebSearchInput {
+  /** Search query */
+  query: string
+  /** Number of search results to return (default: 8) */
+  numResults?: number
+  /**
+   * Live crawl mode:
+   * - 'fallback': use live crawling as backup if cached content unavailable (default)
+   * - 'preferred': prioritize live crawling for fresh content
+   */
+  livecrawl?: "fallback" | "preferred"
+  /**
+   * Search type:
+   * - 'auto': balanced search (default)
+   * - 'fast': quick results, less comprehensive
+   * - 'deep': comprehensive search, slower
+   */
+  type?: "auto" | "fast" | "deep"
+  /** Maximum characters for context (optimized for LLMs, default: 10000) */
+  contextMaxCharacters?: number
+}
+
+/**
  * Todo item for TodoWrite tool
  */
 export interface TodoItem {

@@ -6,6 +6,7 @@
 import type {
   Session,
   SessionConfig,
+  SessionStorage,
   CreateSessionOptions,
 } from "./types/session"
 import type {
@@ -35,6 +36,11 @@ let globalManager: SessionManagerImpl | null = null
 let defaultProvider: LLMProvider | null = null
 
 /**
+ * Default storage instance (optional, defaults to MemorySessionStorage)
+ */
+let defaultStorage: SessionStorage | null = null
+
+/**
  * Set the default LLM provider
  *
  * @param provider - LLM provider instance
@@ -51,6 +57,32 @@ export function setDefaultProvider(provider: LLMProvider): void {
   defaultProvider = provider
 
   // Reset global manager to use new provider
+  globalManager = null
+}
+
+/**
+ * Set the default session storage
+ *
+ * Use this to enable persistent session storage across process restarts.
+ *
+ * @param storage - SessionStorage instance
+ *
+ * @example
+ * ```ts
+ * import { setDefaultStorage, FileSessionStorage } from "formagent-sdk"
+ *
+ * // Enable file-based persistence
+ * setDefaultStorage(new FileSessionStorage("./sessions"))
+ *
+ * // Now sessions will be persisted to disk
+ * const session = await createSession()
+ * // ... later, can resume with session.id
+ * ```
+ */
+export function setDefaultStorage(storage: SessionStorage): void {
+  defaultStorage = storage
+
+  // Reset global manager to use new storage
   globalManager = null
 }
 
@@ -83,7 +115,7 @@ function getGlobalManager(): SessionManagerImpl {
 
     globalManager = new SessionManagerImpl({
       provider: defaultProvider,
-      storage: new MemorySessionStorage(),
+      storage: defaultStorage ?? new MemorySessionStorage(),
     })
   }
 
@@ -114,11 +146,29 @@ function getGlobalManager(): SessionManagerImpl {
  * ```
  */
 export async function createSession(options?: CreateSessionOptions): Promise<Session> {
-  // If a custom provider is specified, create a new manager with that provider
-  if (options?.provider) {
+  // If a custom provider or storage is specified, create a new manager
+  if (options?.provider || options?.sessionStorage) {
+    // Need to get a provider - use provided, default, or auto-detect
+    let provider = options?.provider ?? defaultProvider
+    if (!provider) {
+      if (process.env.ANTHROPIC_API_KEY) {
+        provider = new AnthropicProvider()
+      } else if (process.env.OPENAI_API_KEY) {
+        provider = new OpenAIProvider({
+          apiKey: process.env.OPENAI_API_KEY,
+          baseUrl: process.env.OPENAI_BASE_URL,
+        })
+      } else {
+        throw new Error(
+          "No provider available. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable, " +
+          "call setDefaultProvider(), or pass a provider in the options."
+        )
+      }
+    }
+
     const customManager = new SessionManagerImpl({
-      provider: options.provider,
-      storage: new MemorySessionStorage(),
+      provider,
+      storage: options?.sessionStorage ?? defaultStorage ?? new MemorySessionStorage(),
     })
     return customManager.create(options)
   }

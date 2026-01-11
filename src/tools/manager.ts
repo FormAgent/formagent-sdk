@@ -28,6 +28,20 @@ export type ToolFilter = (tool: ToolDefinition) => boolean
 export type AllowedToolsSpec = string[] | ToolFilter | undefined
 
 /**
+ * Tool repair result
+ */
+export interface ToolRepairResult {
+  /** Whether the tool was repaired */
+  repaired: boolean
+  /** Original tool name */
+  originalName: string
+  /** Repaired tool name (if repaired) */
+  repairedName?: string
+  /** Error message (if repair failed) */
+  error?: string
+}
+
+/**
  * ToolManager options
  */
 export interface ToolManagerOptions {
@@ -35,6 +49,8 @@ export interface ToolManagerOptions {
   allowedTools?: AllowedToolsSpec
   /** Event handler for tool events */
   onToolEvent?: (event: ToolEvent) => void
+  /** Enable tool name repair (case-insensitive matching) */
+  enableToolRepair?: boolean
 }
 
 /**
@@ -60,13 +76,16 @@ export interface ToolManagerOptions {
  */
 export class ToolManager implements ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map()
+  private toolNameLookup: Map<string, string> = new Map() // lowercase -> original name
   private mcpServers: Map<string, MCPServerWrapper> = new Map()
   private allowedTools: AllowedToolsSpec
   private onToolEvent?: (event: ToolEvent) => void
+  private enableToolRepair: boolean
 
   constructor(options: ToolManagerOptions = {}) {
     this.allowedTools = options.allowedTools
     this.onToolEvent = options.onToolEvent
+    this.enableToolRepair = options.enableToolRepair ?? true // Enabled by default
   }
 
   /**
@@ -76,6 +95,8 @@ export class ToolManager implements ToolRegistry {
    */
   register(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool)
+    // Add lowercase lookup for case-insensitive matching
+    this.toolNameLookup.set(tool.name.toLowerCase(), tool.name)
   }
 
   /**
@@ -85,6 +106,7 @@ export class ToolManager implements ToolRegistry {
    */
   unregister(name: string): void {
     this.tools.delete(name)
+    this.toolNameLookup.delete(name.toLowerCase())
   }
 
   /**
@@ -94,10 +116,19 @@ export class ToolManager implements ToolRegistry {
    * @returns Tool definition or undefined
    */
   get(name: string): ToolDefinition | undefined {
-    // Check local tools first
+    // Check local tools first (exact match)
     const tool = this.tools.get(name)
     if (tool) {
       return tool
+    }
+
+    // Try case-insensitive match if repair is enabled
+    if (this.enableToolRepair) {
+      const lowerName = name.toLowerCase()
+      const originalName = this.toolNameLookup.get(lowerName)
+      if (originalName) {
+        return this.tools.get(originalName)
+      }
     }
 
     // Check MCP tools
@@ -113,6 +144,51 @@ export class ToolManager implements ToolRegistry {
     }
 
     return undefined
+  }
+
+  /**
+   * Attempt to repair a tool name
+   *
+   * Tries case-insensitive matching to find the correct tool name.
+   *
+   * @param name - Original tool name
+   * @returns Repair result with corrected name or error
+   */
+  repairToolName(name: string): ToolRepairResult {
+    // Check exact match first
+    if (this.tools.has(name)) {
+      return { repaired: false, originalName: name }
+    }
+
+    // Try case-insensitive match
+    const lowerName = name.toLowerCase()
+    const originalName = this.toolNameLookup.get(lowerName)
+
+    if (originalName && originalName !== name) {
+      return {
+        repaired: true,
+        originalName: name,
+        repairedName: originalName,
+      }
+    }
+
+    // Check MCP tools
+    if (isMCPTool(name)) {
+      const parsed = parseMCPToolName(name)
+      if (parsed) {
+        const wrapper = this.mcpServers.get(parsed.serverName)
+        if (wrapper) {
+          return { repaired: false, originalName: name }
+        }
+      }
+    }
+
+    // Tool not found
+    return {
+      repaired: false,
+      originalName: name,
+      error: `Tool "${name}" not found. Available tools: ${Array.from(this.tools.keys()).join(", ")}`,
+    }
   }
 
   /**
@@ -157,6 +233,7 @@ export class ToolManager implements ToolRegistry {
    */
   clear(): void {
     this.tools.clear()
+    this.toolNameLookup.clear()
   }
 
   /**
@@ -176,6 +253,7 @@ export class ToolManager implements ToolRegistry {
     const tools = await wrapper.getTools()
     for (const tool of tools) {
       this.tools.set(tool.name, tool)
+      this.toolNameLookup.set(tool.name.toLowerCase(), tool.name)
     }
 
     return tools.length
@@ -195,6 +273,7 @@ export class ToolManager implements ToolRegistry {
           const parsed = parseMCPToolName(name)
           if (parsed?.serverName === serverName) {
             this.tools.delete(name)
+            this.toolNameLookup.delete(name.toLowerCase())
           }
         }
       }
@@ -216,6 +295,8 @@ export class ToolManager implements ToolRegistry {
   /**
    * Execute a tool by name
    *
+   * Supports automatic tool name repair (case-insensitive matching) when enabled.
+   *
    * @param name - Tool name
    * @param input - Tool input parameters
    * @param context - Tool execution context
@@ -226,9 +307,32 @@ export class ToolManager implements ToolRegistry {
     input: Record<string, unknown>,
     context: ToolContext
   ): Promise<ToolOutput> {
-    const tool = this.get(name)
+    // Try to repair tool name if exact match not found
+    let effectiveName = name
+    let tool = this.tools.get(name)
+
+    if (!tool && this.enableToolRepair) {
+      const repairResult = this.repairToolName(name)
+      if (repairResult.repaired && repairResult.repairedName) {
+        effectiveName = repairResult.repairedName
+        tool = this.tools.get(effectiveName)
+        // Log the repair for debugging
+        console.debug(`[ToolManager] Repaired tool name: "${name}" -> "${effectiveName}"`)
+      }
+    }
+
+    // If still not found, try the full get() which handles MCP tools
     if (!tool) {
-      throw new Error(`Tool not found: ${name}`)
+      tool = this.get(name)
+    }
+
+    if (!tool) {
+      // Return helpful error message with available tools
+      const availableTools = Array.from(this.tools.keys()).slice(0, 10)
+      const suffix = this.tools.size > 10 ? ` (and ${this.tools.size - 10} more)` : ""
+      throw new Error(
+        `Tool not found: "${name}". Available tools: ${availableTools.join(", ")}${suffix}`
+      )
     }
 
     if (!this.isToolAllowed(tool)) {
@@ -237,11 +341,11 @@ export class ToolManager implements ToolRegistry {
 
     const toolId = generateId("tool")
 
-    // Emit start event
+    // Emit start event (use effective name to show repaired name)
     this.emitEvent({
       type: "tool_start",
       toolId,
-      toolName: name,
+      toolName: effectiveName,
       input,
     })
 

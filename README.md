@@ -8,6 +8,7 @@ A powerful AI Agent framework for building intelligent assistants with streaming
 ## Features
 
 - **Session-Based API**: Multi-turn conversations with state management
+- **Persistent Sessions**: File-based storage for session persistence across restarts
 - **Streaming Support**: Real-time streaming of LLM responses with event-based notifications
 - **Built-in Tools**: File operations, bash execution, web fetch, and task management
 - **Tool System**: Flexible tool registration with Zod schema support
@@ -227,20 +228,68 @@ for await (const event of session.receive()) {
 
 ## Session Management
 
-Resume and fork sessions:
+### Persistent Sessions
+
+Enable session persistence with `FileSessionStorage`:
 
 ```typescript
-import { createSession, resumeSession, forkSession } from "formagent-sdk"
+import { createSession, FileSessionStorage, builtinTools } from "formagent-sdk"
 
-// Create a session
+// Create persistent storage
+const storage = new FileSessionStorage("./sessions")
+
+// Create session with persistence
+const session = await createSession({
+  model: "claude-sonnet-4-20250514",
+  tools: builtinTools,
+  sessionStorage: storage,
+})
+
+console.log(`Session ID: ${session.id}`)  // Save this for later
+await session.close()
+```
+
+### Resume Sessions
+
+Resume a previous session with full conversation context:
+
+```typescript
+import { createSession, FileSessionStorage } from "formagent-sdk"
+
+const storage = new FileSessionStorage("./sessions")
+
+// Resume from saved session ID
+const session = await createSession({
+  sessionStorage: storage,
+  resume: "previous-session-id",
+})
+
+await session.send("Continue where we left off")
+```
+
+### Global Storage Configuration
+
+Set a default storage for all sessions:
+
+```typescript
+import { setDefaultStorage, FileSessionStorage, createSession } from "formagent-sdk"
+
+// Set once at startup
+setDefaultStorage(new FileSessionStorage("./sessions"))
+
+// All sessions now persist automatically
 const session = await createSession({ model: "claude-sonnet-4-20250514" })
-const sessionId = session.id
+```
 
-// Later: Resume the session
-const resumed = await resumeSession(sessionId)
+### Fork Sessions
 
-// Or: Fork the session (create a branch)
-const forked = await forkSession(sessionId)
+Create a branch from an existing session:
+
+```typescript
+import { forkSession } from "formagent-sdk"
+
+// Fork creates a new session with copied conversation history
+const forked = await forkSession("original-session-id")
 ```
 
 ## Event Types
@@ -272,6 +321,7 @@ See the [examples](./examples) directory for complete examples:
 
 - [Getting Started](./docs/getting-started.md)
 - [API Reference](./docs/api-reference.md)
+- [Session Storage](./docs/session-storage.md)
 - [Built-in Tools](./docs/tools.md)
 - [MCP Servers](./docs/mcp-servers.md)
 

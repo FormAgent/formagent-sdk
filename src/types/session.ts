@@ -59,6 +59,8 @@ export interface CreateSessionOptions extends SessionConfig {
   fork?: string
   /** Custom LLM provider (overrides default) */
   provider?: LLMProvider
+  /** Custom session storage (overrides default, enables persistence) */
+  sessionStorage?: SessionStorage
 }
 
 // === Session State ===
