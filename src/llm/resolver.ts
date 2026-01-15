@@ -6,6 +6,7 @@
 import type { LLMProvider, ProviderRegistry } from "../types/provider"
 import { AnthropicProvider } from "./anthropic"
 import { OpenAIProvider } from "./openai"
+import { GeminiProvider } from "./gemini"
 
 /**
  * Model pattern matching rule
@@ -29,6 +30,9 @@ const DEFAULT_MODEL_PATTERNS: ModelPattern[] = [
   { pattern: /^gpt-3\.5/, providerId: "openai" },
   { pattern: /^o1/, providerId: "openai" },
   { pattern: /^chatgpt/, providerId: "openai" },
+
+  // Gemini models
+  { pattern: /^gemini-/, providerId: "gemini" },
 
   // DeepSeek models
   { pattern: /^deepseek-/, providerId: "deepseek" },
@@ -223,6 +227,7 @@ export class ProviderResolver implements ProviderRegistry {
 export function createProviderResolver(config: {
   anthropicApiKey?: string
   openaiApiKey?: string
+  geminiApiKey?: string
   defaultProviderId?: string
 }): ProviderResolver {
   const resolver = new ProviderResolver()
@@ -248,6 +253,18 @@ export function createProviderResolver(config: {
 
     if (config.defaultProviderId === "openai") {
       resolver.setDefaultProvider(openai)
+    }
+  }
+
+  // Register Gemini provider if API key provided
+  if (config.geminiApiKey) {
+    const gemini = new GeminiProvider({
+      apiKey: config.geminiApiKey,
+    })
+    resolver.register(gemini)
+
+    if (config.defaultProviderId === "gemini") {
+      resolver.setDefaultProvider(gemini)
     }
   }
 

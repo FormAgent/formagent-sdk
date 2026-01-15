@@ -11,6 +11,10 @@ export type { AnthropicProviderConfig } from "./anthropic"
 export { OpenAIProvider, createOpenAIProvider } from "./openai"
 export type { OpenAICompatibleConfig } from "./openai"
 
+// Gemini provider
+export { GeminiProvider, createGeminiProvider } from "./gemini"
+export type { GeminiProviderConfig } from "./gemini"
+
 // Provider resolver
 export {
   ProviderResolver,

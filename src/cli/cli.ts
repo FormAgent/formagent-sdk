@@ -7,10 +7,12 @@ import * as readline from "node:readline"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { existsSync } from "node:fs"
+import { readFileSync } from "node:fs"
 
 import { createSession } from "../api"
 import { AnthropicProvider } from "../llm/anthropic"
 import { OpenAIProvider } from "../llm/openai"
+import { GeminiProvider } from "../llm/gemini"
 import { builtinTools } from "../tools"
 import { getTodos, clearTodos, setTodoChangeCallback } from "../tools/builtin/todo"
 import { SkillLoader } from "../skills/loader"
@@ -22,8 +24,18 @@ import type { Session } from "../types/session"
 // Load .env and override shell environment variables
 loadEnvOverride()
 
-// Version from package.json (will be replaced at build time)
-const VERSION = "0.1.0"
+function getCliVersion(): string {
+  try {
+    const pkgUrl = new URL("../../package.json", import.meta.url)
+    const raw = readFileSync(pkgUrl, "utf-8")
+    const parsed = JSON.parse(raw) as { version?: string }
+    return parsed.version ?? "0.0.0"
+  } catch {
+    return "0.0.0"
+  }
+}
+
+const VERSION = getCliVersion()
 
 // Skills path
 const SKILLS_PATH = join(homedir(), ".claude")
@@ -60,7 +72,7 @@ let session: Session | null = null
 let totalInputTokens = 0
 let totalOutputTokens = 0
 let messageCount = 0
-let currentProviderId: "anthropic" | "openai" | null = null
+let currentProviderId: "anthropic" | "openai" | "gemini" | null = null
 let currentModelOverride: string | null = null
 
 /**
@@ -137,6 +149,9 @@ ${c.bold("Interactive Commands:")}
 ${c.bold("Environment:")}
   ${c.cyan("ANTHROPIC_API_KEY")}   Anthropic API key (for Claude models)
   ${c.cyan("ANTHROPIC_MODEL")}     Optional. Claude model (default: claude-sonnet-4-20250514)
+  ${c.cyan("GEMINI_API_KEY")}      Gemini API key (for Gemini models)
+  ${c.cyan("GEMINI_MODEL")}        Optional. Gemini model (default: gemini-1.5-pro)
+  ${c.cyan("GEMINI_BASE_URL")}     Optional. Custom Gemini API base URL
   ${c.cyan("OPENAI_API_KEY")}      OpenAI API key (for GPT models)
   ${c.cyan("OPENAI_MODEL")}        Optional. OpenAI model (default: gpt-5.2)
   ${c.cyan("OPENAI_BASE_URL")}     Optional. Custom OpenAI-compatible API URL
@@ -306,8 +321,10 @@ function printModelsHelp() {
   console.log()
   console.log(c.bold("Usage:"))
   console.log(`  ${c.cyan("/models")}`)
+  console.log(c.dim("    List models for the active provider"))
   console.log(`  ${c.cyan("/models")} openai gpt-5-mini`)
   console.log(`  ${c.cyan("/models")} anthropic claude-sonnet-4-20250514`)
+  console.log(`  ${c.cyan("/models")} gemini gemini-1.5-pro`)
   console.log(`  ${c.cyan("/models")} gpt-5.2`)
   console.log(`  ${c.cyan("/models")} reset`)
   console.log()
@@ -315,7 +332,7 @@ function printModelsHelp() {
 
 async function handleModelsCommand(args: string[]): Promise<void> {
   if (args.length === 0) {
-    printModelsHelp()
+    await listModelsSummary()
     return
   }
 
@@ -350,7 +367,7 @@ async function handleModelsCommand(args: string[]): Promise<void> {
 
   const provider = parseProvider(args[0])
   if (!provider) {
-    console.log(c.yellow(`\n  Unknown provider: ${args[0]}. Use "openai" or "anthropic".\n`))
+    console.log(c.yellow(`\n  Unknown provider: ${args[0]}. Use "openai", "anthropic", or "gemini".\n`))
     return
   }
 
@@ -366,6 +383,183 @@ async function handleModelsCommand(args: string[]): Promise<void> {
   console.log(
     c.green(`\n  ✓ Provider set to ${provider}, model set to ${model}.\n`)
   )
+}
+
+function normalizeOpenAIBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "")
+  if (trimmed.endsWith("/v1")) {
+    return trimmed
+  }
+  return `${trimmed}/v1`
+}
+
+function getOpenAIApiType(baseUrl: string): "openai" | "openai-compatible" {
+  const normalized = baseUrl.toLowerCase()
+  return normalized.includes("api.openai.com") ? "openai" : "openai-compatible"
+}
+
+function isGoogleGeminiBaseUrl(baseUrl: string): boolean {
+  const normalized = baseUrl.toLowerCase()
+  return normalized.includes("generativelanguage.googleapis.com") || normalized.includes("/v1beta")
+}
+
+async function listAnthropicModels(): Promise<void> {
+  const baseUrlRaw = (process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/+$/, "")
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  const baseUrl = baseUrlRaw.endsWith("/v1") ? baseUrlRaw : `${baseUrlRaw}/v1`
+
+  console.log(c.bold("Anthropic Models:"))
+  console.log(c.dim("  API Type: anthropic (official)"))
+  console.log(c.dim(`  Base URL: ${baseUrl}`))
+
+  if (!apiKey) {
+    console.log(c.red("  ✗ ANTHROPIC_API_KEY not set"))
+    console.log()
+    return
+  }
+
+  const res = await fetch(`${baseUrl}/models`, {
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+  })
+  if (!res.ok) {
+    console.log(c.red(`  ✗ Failed to fetch models (${res.status})`))
+    console.log(c.dim(`  URL: ${baseUrl}/models`))
+    console.log()
+    return
+  }
+
+  const payload = (await res.json()) as { data?: Array<{ id: string; display_name?: string; type?: string }> }
+  const items = payload.data ?? []
+  for (const item of items) {
+    const name = item.display_name ? ` (${item.display_name})` : ""
+    console.log(`  ${c.green("●")} ${item.id}${name}`)
+  }
+  console.log()
+}
+
+async function listOpenAIModels(): Promise<void> {
+  const baseUrl = normalizeOpenAIBaseUrl(
+    process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
+  )
+  const apiFlavor = getOpenAIApiType(baseUrl)
+  const apiKey = process.env.OPENAI_API_KEY
+
+  console.log(c.bold("OpenAI Models:"))
+  console.log(c.dim(`  API Type: ${apiFlavor}`))
+  console.log(c.dim(`  Base URL: ${baseUrl}`))
+
+  if (!apiKey) {
+    console.log(c.red("  ✗ OPENAI_API_KEY not set"))
+    console.log()
+    return
+  }
+
+  const res = await fetch(`${baseUrl}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  if (!res.ok) {
+    console.log(c.red(`  ✗ Failed to fetch models (${res.status})`))
+    console.log(c.dim(`  URL: ${baseUrl}/models`))
+    console.log()
+    return
+  }
+
+  const payload = (await res.json()) as { data?: Array<{ id: string; owned_by?: string }> }
+  const items = payload.data ?? []
+  for (const item of items) {
+    const owner = item.owned_by ? ` (${item.owned_by})` : ""
+    console.log(`  ${c.green("●")} ${item.id}${owner}`)
+  }
+  console.log()
+}
+
+async function listGeminiModels(): Promise<void> {
+  const baseUrlRaw = (process.env.GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta").replace(/\/+$/, "")
+  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
+
+  console.log(c.bold("Gemini Models:"))
+  console.log(c.dim(`  Base URL: ${baseUrlRaw}`))
+
+  if (!apiKey) {
+    console.log(c.red("  ✗ GEMINI_API_KEY not set"))
+    console.log()
+    return
+  }
+
+  if (isGoogleGeminiBaseUrl(baseUrlRaw)) {
+    console.log(c.dim("  API Type: gemini"))
+    const url = `${baseUrlRaw}/models`
+    const res = await fetch(url, {
+      headers: { "x-goog-api-key": apiKey },
+    })
+    if (!res.ok) {
+      console.log(c.red(`  ✗ Failed to fetch models (${res.status})`))
+      console.log(c.dim(`  URL: ${url}`))
+      console.log()
+      return
+    }
+
+    const payload = (await res.json()) as { models?: Array<{ name: string }> }
+    const items = payload.models ?? []
+    for (const item of items) {
+      console.log(`  ${c.green("●")} ${item.name}`)
+    }
+    console.log()
+    return
+  }
+
+  const openaiBase = normalizeOpenAIBaseUrl(baseUrlRaw)
+  console.log(c.dim("  API Type: openai-compatible"))
+  console.log(c.dim("  Auth: Bearer (GEMINI_API_KEY)"))
+
+  const res = await fetch(`${openaiBase}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  if (!res.ok) {
+    console.log(c.red(`  ✗ Failed to fetch models (${res.status})`))
+    console.log(c.dim(`  URL: ${openaiBase}/models`))
+    console.log()
+    return
+  }
+
+  const payload = (await res.json()) as { data?: Array<{ id: string; owned_by?: string }> }
+  const items = payload.data ?? []
+  for (const item of items) {
+    const owner = item.owned_by ? ` (${item.owned_by})` : ""
+    console.log(`  ${c.green("●")} ${item.id}${owner}`)
+  }
+  console.log()
+}
+
+async function listModelsSummary(): Promise<void> {
+  const provider = getActiveProviderId()
+  const apiType = provider ?? "auto"
+
+  console.log()
+  console.log(c.bold("Available Models:"))
+  console.log(c.dim(`  Active Provider: ${apiType}`))
+  console.log()
+
+  printModelsHelp()
+
+  try {
+    await listOpenAIModels()
+  } catch (error) {
+    console.log(c.red(`  ✗ OpenAI: ${error instanceof Error ? error.message : String(error)}`))
+    console.log()
+  }
+
+  try {
+    await listGeminiModels()
+  } catch (error) {
+    console.log(c.red(`  ✗ Gemini: ${error instanceof Error ? error.message : String(error)}`))
+    console.log()
+  }
+
+  await listAnthropicModels()
 }
 
 /**
@@ -389,6 +583,8 @@ function printDebug() {
   console.log(`  ${c.cyan("Provider:")}       ${getActiveProviderId() ?? "auto"}`)
   console.log(`  ${c.cyan("Override:")}       ${currentModelOverride ?? c.dim("(not set)")}`)
   console.log(`  ${c.cyan("ANTHROPIC_MODEL:")} ${process.env.ANTHROPIC_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("GEMINI_MODEL:")}    ${process.env.GEMINI_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("GEMINI_BASE_URL:")} ${process.env.GEMINI_BASE_URL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("OPENAI_MODEL:")}    ${process.env.OPENAI_MODEL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("OPENAI_BASE_URL:")} ${process.env.OPENAI_BASE_URL || c.dim("(not set)")}`)
   console.log()
@@ -396,8 +592,10 @@ function printDebug() {
   // API Keys (masked)
   console.log(c.bold("API Keys:"))
   const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
   const openaiKey = process.env.OPENAI_API_KEY
   console.log(`  ${c.cyan("ANTHROPIC_API_KEY:")} ${anthropicKey ? c.green("✓ set") + c.dim(` (${anthropicKey.slice(0, 8)}...${anthropicKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log(`  ${c.cyan("GEMINI_API_KEY:")}    ${geminiKey ? c.green("✓ set") + c.dim(` (${geminiKey.slice(0, 8)}...${geminiKey.slice(-4)})`) : c.red("✗ not set")}`)
   console.log(`  ${c.cyan("OPENAI_API_KEY:")}    ${openaiKey ? c.green("✓ set") + c.dim(` (${openaiKey.slice(0, 8)}...${openaiKey.slice(-4)})`) : c.red("✗ not set")}`)
   console.log()
 
@@ -477,17 +675,20 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 /**
  * Get the default model based on environment
  */
-function getDefaultProviderFromEnv(): "anthropic" | "openai" | null {
+function getDefaultProviderFromEnv(): "anthropic" | "openai" | "gemini" | null {
   if (process.env.ANTHROPIC_API_KEY) {
     return "anthropic"
   }
   if (process.env.OPENAI_API_KEY) {
     return "openai"
   }
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+    return "gemini"
+  }
   return null
 }
 
-function inferProviderFromModel(model: string): "anthropic" | "openai" | null {
+function inferProviderFromModel(model: string): "anthropic" | "openai" | "gemini" | null {
   const normalized = model.toLowerCase()
   if (normalized.startsWith("claude")) {
     return "anthropic"
@@ -495,17 +696,23 @@ function inferProviderFromModel(model: string): "anthropic" | "openai" | null {
   if (normalized.startsWith("gpt") || normalized.startsWith("o1") || normalized.startsWith("chatgpt")) {
     return "openai"
   }
+  if (normalized.startsWith("gemini") || normalized.startsWith("models/gemini")) {
+    return "gemini"
+  }
   return null
 }
 
-function getDefaultModelForProvider(providerId: "anthropic" | "openai"): string {
+function getDefaultModelForProvider(providerId: "anthropic" | "openai" | "gemini"): string {
   if (providerId === "anthropic") {
     return process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
+  }
+  if (providerId === "gemini") {
+    return process.env.GEMINI_MODEL || "gemini-1.5-pro"
   }
   return process.env.OPENAI_MODEL || "gpt-5.2"
 }
 
-function getActiveProviderId(): "anthropic" | "openai" | null {
+function getActiveProviderId(): "anthropic" | "openai" | "gemini" | null {
   if (currentProviderId) {
     return currentProviderId
   }
@@ -526,7 +733,7 @@ function getActiveModel(): string {
   return "claude-sonnet-4-20250514"
 }
 
-function parseProvider(arg: string): "anthropic" | "openai" | null {
+function parseProvider(arg: string): "anthropic" | "openai" | "gemini" | null {
   const normalized = arg.toLowerCase()
   if (normalized === "anthropic" || normalized === "claude") {
     return "anthropic"
@@ -534,12 +741,21 @@ function parseProvider(arg: string): "anthropic" | "openai" | null {
   if (normalized === "openai" || normalized === "gpt") {
     return "openai"
   }
+  if (normalized === "gemini" || normalized === "google") {
+    return "gemini"
+  }
   return null
 }
 
-function createProvider(providerId: "anthropic" | "openai") {
+function createProvider(providerId: "anthropic" | "openai" | "gemini") {
   if (providerId === "anthropic") {
     return new AnthropicProvider()
+  }
+  if (providerId === "gemini") {
+    return new GeminiProvider({
+      apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
+      baseUrl: process.env.GEMINI_BASE_URL,
+    })
   }
   return new OpenAIProvider({
     apiKey: process.env.OPENAI_API_KEY,
@@ -699,9 +915,14 @@ async function handleInput(input: string): Promise<boolean> {
  */
 async function runQuickQuery(query: string): Promise<void> {
   // Check API key
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+  if (
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.OPENAI_API_KEY &&
+    !process.env.GEMINI_API_KEY &&
+    !process.env.GOOGLE_API_KEY
+  ) {
     console.error(c.red("Error: No API key found"))
-    console.error(c.dim("Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable"))
+    console.error(c.dim("Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY environment variable"))
     process.exit(1)
   }
 
@@ -721,9 +942,14 @@ async function runQuickQuery(query: string): Promise<void> {
  */
 async function runInteractive(): Promise<void> {
   // Check API key
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+  if (
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.OPENAI_API_KEY &&
+    !process.env.GEMINI_API_KEY &&
+    !process.env.GOOGLE_API_KEY
+  ) {
     console.error(c.red("Error: No API key found"))
-    console.error(c.dim("Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable"))
+    console.error(c.dim("Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY environment variable"))
     process.exit(1)
   }
 

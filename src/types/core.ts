@@ -127,7 +127,14 @@ export interface ExtendedUsageInfo extends UsageInfo {
 /**
  * Supported LLM providers
  */
-export type LLMProviderType = "anthropic" | "openai" | "deepseek" | "ollama" | "openrouter" | "custom"
+export type LLMProviderType =
+  | "anthropic"
+  | "openai"
+  | "gemini"
+  | "deepseek"
+  | "ollama"
+  | "openrouter"
+  | "custom"
 
 /**
  * Model configuration (Claude SDK compatible with extensions)

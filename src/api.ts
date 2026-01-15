@@ -24,6 +24,7 @@ import { MemorySessionStorage } from "./session/storage"
 import { generateSessionId } from "./utils/id"
 import { AnthropicProvider } from "./llm/anthropic"
 import { OpenAIProvider } from "./llm/openai"
+import { GeminiProvider } from "./llm/gemini"
 
 /**
  * Global session manager instance (lazy initialized)
@@ -93,6 +94,7 @@ export function setDefaultStorage(storage: SessionStorage): void {
  * based on available environment variables:
  * - ANTHROPIC_API_KEY -> AnthropicProvider
  * - OPENAI_API_KEY -> OpenAIProvider
+ * - GEMINI_API_KEY/GOOGLE_API_KEY -> GeminiProvider
  */
 function getGlobalManager(): SessionManagerImpl {
   if (!globalManager) {
@@ -105,9 +107,14 @@ function getGlobalManager(): SessionManagerImpl {
           apiKey: process.env.OPENAI_API_KEY,
           baseUrl: process.env.OPENAI_BASE_URL,
         })
+      } else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+        defaultProvider = new GeminiProvider({
+          apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
+          baseUrl: process.env.GEMINI_BASE_URL,
+        })
       } else {
         throw new Error(
-          "No default provider set. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable, " +
+          "No default provider set. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY environment variable, " +
           "call setDefaultProvider(), or pass a provider in the options."
         )
       }
@@ -158,9 +165,14 @@ export async function createSession(options?: CreateSessionOptions): Promise<Ses
           apiKey: process.env.OPENAI_API_KEY,
           baseUrl: process.env.OPENAI_BASE_URL,
         })
+      } else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+        provider = new GeminiProvider({
+          apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
+          baseUrl: process.env.GEMINI_BASE_URL,
+        })
       } else {
         throw new Error(
-          "No provider available. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable, " +
+          "No provider available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY environment variable, " +
           "call setDefaultProvider(), or pass a provider in the options."
         )
       }

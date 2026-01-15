@@ -93,6 +93,7 @@ export { Agent } from "./loop/agent"
 export { ToolRegistry } from "./tools/registry"
 export { SkillLoader } from "./skills/loader"
 export { OpenAIProvider } from "./llm/openai"
+export { GeminiProvider } from "./llm/gemini"
 export { StreamProcessor } from "./stream/processor"
 export { AgentEventEmitter } from "./types"
 

@@ -147,7 +147,7 @@ export class OpenAIProvider implements LLMProvider {
 
     const openaiRequest = this.buildRequest(request, false)
 
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+    let response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: this.getHeaders(),
       body: JSON.stringify(openaiRequest),
@@ -156,6 +156,24 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!response.ok) {
       const error = await response.text()
+      if (this.shouldFallbackToResponses(response.status, error)) {
+        const fallbackRequest = this.buildResponsesRequest(request, false)
+        response = await fetch(`${this.config.baseUrl}/responses`, {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify(fallbackRequest),
+          signal: request.abortSignal,
+        })
+
+        if (!response.ok) {
+          const fallbackError = await response.text()
+          throw new Error(`OpenAI API error: ${response.status} ${fallbackError}`)
+        }
+
+        const data = (await response.json()) as OpenAIResponsesResponse
+        return this.convertResponsesResponse(data)
+      }
+
       throw new Error(`OpenAI API error: ${response.status} ${error}`)
     }
 
@@ -185,7 +203,7 @@ export class OpenAIProvider implements LLMProvider {
 
     const openaiRequest = this.buildRequest(request, true)
 
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+    let response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: this.getHeaders(),
       body: JSON.stringify(openaiRequest),
@@ -194,6 +212,23 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!response.ok) {
       const error = await response.text()
+      if (this.shouldFallbackToResponses(response.status, error)) {
+        const fallbackRequest = this.buildResponsesRequest(request, true)
+        response = await fetch(`${this.config.baseUrl}/responses`, {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify(fallbackRequest),
+          signal: request.abortSignal,
+        })
+
+        if (!response.ok) {
+          const fallbackError = await response.text()
+          throw new Error(`OpenAI API error: ${response.status} ${fallbackError}`)
+        }
+
+        return this.createResponsesStreamIterator(response.body!, options)
+      }
+
       throw new Error(`OpenAI API error: ${response.status} ${error}`)
     }
 
@@ -253,6 +288,14 @@ export class OpenAIProvider implements LLMProvider {
 
   private usesResponsesApi(model: string): boolean {
     return /^gpt-5/.test(model) || /^o1/.test(model)
+  }
+
+  private shouldFallbackToResponses(status: number, errorText: string): boolean {
+    if (status !== 404) {
+      return false
+    }
+    const normalized = errorText.toLowerCase()
+    return normalized.includes("/chat/completions") && normalized.includes("not found")
   }
 
   private convertResponsesInput(
@@ -382,6 +425,11 @@ export class OpenAIProvider implements LLMProvider {
       }
 
       if (path.endsWith("/openai")) {
+        url.pathname = `${path}/v1`
+        return url.toString().replace(/\/+$/, "")
+      }
+
+      if (!/\/v\d/.test(path)) {
         url.pathname = `${path}/v1`
         return url.toString().replace(/\/+$/, "")
       }
