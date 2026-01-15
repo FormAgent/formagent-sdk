@@ -484,10 +484,24 @@ export class SessionImpl implements Session {
     let toolInput = block.input
     let systemMessage: string | undefined
 
+    // Try to get tool with case-insensitive matching
+    let tool = this.tools.get(block.name)
+    let effectiveToolName = block.name
+
+    if (!tool && this.enableToolRepair) {
+      // Try case-insensitive lookup
+      const lowerName = block.name.toLowerCase()
+      const originalName = this.toolNameLookup.get(lowerName)
+      if (originalName) {
+        tool = this.tools.get(originalName)
+        effectiveToolName = originalName
+      }
+    }
+
     // Run PreToolUse hooks
     if (this.hooksManager) {
       const preResult = await this.hooksManager.runPreToolUse(
-        block.name,
+        effectiveToolName,
         block.input,
         block.id,
         abortSignal
@@ -509,7 +523,7 @@ export class SessionImpl implements Session {
         return {
           type: "tool_result",
           tool_use_id: block.id,
-          content: preResult.reason ?? `Tool "${block.name}" was denied by hook`,
+          content: preResult.reason ?? `Tool "${effectiveToolName}" was denied by hook`,
           is_error: true,
           _hookSystemMessage: preResult.systemMessage,
         }
@@ -521,20 +535,6 @@ export class SessionImpl implements Session {
       }
 
       systemMessage = preResult.systemMessage
-    }
-
-    // Try to get tool with case-insensitive matching
-    let tool = this.tools.get(block.name)
-    let effectiveToolName = block.name
-
-    if (!tool && this.enableToolRepair) {
-      // Try case-insensitive lookup
-      const lowerName = block.name.toLowerCase()
-      const originalName = this.toolNameLookup.get(lowerName)
-      if (originalName) {
-        tool = this.tools.get(originalName)
-        effectiveToolName = originalName
-      }
     }
 
     if (!tool) {
@@ -588,7 +588,7 @@ export class SessionImpl implements Session {
     // Run PostToolUse hooks
     if (this.hooksManager) {
       const postResult = await this.hooksManager.runPostToolUse(
-        block.name,
+        effectiveToolName,
         toolInput,
         toolResponse,
         block.id,

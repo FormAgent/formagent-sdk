@@ -19,6 +19,46 @@ import type {
 } from "../types/core"
 import type { ToolDefinition } from "../types/tool"
 
+type OpenAIResponsesInputItem =
+  | { role: "system" | "developer"; content: string }
+  | { role: "user"; content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }> }
+  | { role: "assistant"; content: Array<{ type: "output_text"; text: string }>; id?: string }
+  | { type: "function_call"; call_id: string; name: string; arguments: string; id?: string }
+  | { type: "function_call_output"; call_id: string; output: string }
+
+interface OpenAIResponsesRequest {
+  model: string
+  input: OpenAIResponsesInputItem[]
+  max_output_tokens?: number
+  temperature?: number
+  top_p?: number
+  stop?: string[]
+  stream?: boolean
+  tools?: Array<{
+    type: "function"
+    name: string
+    description?: string
+    parameters: Record<string, unknown>
+  }>
+}
+
+interface OpenAIResponsesResponse {
+  id: string
+  model: string
+  output: Array<{
+    type: string
+    id?: string
+    call_id?: string
+    name?: string
+    arguments?: string
+    content?: Array<{ type: "output_text"; text: string }>
+  }>
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+  }
+}
+
 /**
  * OpenAI provider configuration
  */
@@ -73,7 +113,9 @@ export class OpenAIProvider implements LLMProvider {
 
     this.config = {
       apiKey,
-      baseUrl: config.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+      baseUrl: this.normalizeBaseUrl(
+        config.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
+      ),
       organization: config.organization,
       defaultMaxTokens: config.defaultMaxTokens ?? 4096,
     }
@@ -84,6 +126,25 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
+    if (this.usesResponsesApi(request.config.model)) {
+      const openaiRequest = this.buildResponsesRequest(request, false)
+
+      const response = await fetch(`${this.config.baseUrl}/responses`, {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(openaiRequest),
+        signal: request.abortSignal,
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`OpenAI API error: ${response.status} ${error}`)
+      }
+
+      const data = (await response.json()) as OpenAIResponsesResponse
+      return this.convertResponsesResponse(data)
+    }
+
     const openaiRequest = this.buildRequest(request, false)
 
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
@@ -104,6 +165,24 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async stream(request: LLMRequest, options?: StreamOptions): Promise<LLMStreamResponse> {
+    if (this.usesResponsesApi(request.config.model)) {
+      const openaiRequest = this.buildResponsesRequest(request, true)
+
+      const response = await fetch(`${this.config.baseUrl}/responses`, {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(openaiRequest),
+        signal: request.abortSignal,
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`OpenAI API error: ${response.status} ${error}`)
+      }
+
+      return this.createResponsesStreamIterator(response.body!, options)
+    }
+
     const openaiRequest = this.buildRequest(request, true)
 
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
@@ -131,16 +210,185 @@ export class OpenAIProvider implements LLMProvider {
     // Convert tools
     const tools = request.tools ? this.convertTools(request.tools) : undefined
 
-    return {
+    const maxTokens = request.config.maxTokens ?? this.config.defaultMaxTokens!
+    const openaiRequest: OpenAIRequest = {
       model: request.config.model,
       messages,
-      max_tokens: request.config.maxTokens ?? this.config.defaultMaxTokens!,
       temperature: request.config.temperature,
       top_p: request.config.topP,
       stop: request.config.stopSequences,
       stream,
       stream_options: stream ? { include_usage: true } : undefined,
       tools,
+    }
+
+    if (this.usesMaxCompletionTokens(request.config.model)) {
+      openaiRequest.max_completion_tokens = maxTokens
+    } else {
+      openaiRequest.max_tokens = maxTokens
+    }
+
+    return openaiRequest
+  }
+
+  private buildResponsesRequest(request: LLMRequest, stream: boolean): OpenAIResponsesRequest {
+    const input = this.convertResponsesInput(request.messages, request.systemPrompt)
+    const tools = request.tools ? this.convertResponsesTools(request.tools) : undefined
+
+    return {
+      model: request.config.model,
+      input,
+      max_output_tokens: request.config.maxTokens ?? this.config.defaultMaxTokens!,
+      temperature: request.config.temperature,
+      top_p: request.config.topP,
+      stop: request.config.stopSequences,
+      stream,
+      tools,
+    }
+  }
+
+  private usesMaxCompletionTokens(model: string): boolean {
+    return /^gpt-5/.test(model) || /^o1/.test(model)
+  }
+
+  private usesResponsesApi(model: string): boolean {
+    return /^gpt-5/.test(model) || /^o1/.test(model)
+  }
+
+  private convertResponsesInput(
+    messages: LLMRequest["messages"],
+    systemPrompt?: string
+  ): OpenAIResponsesInputItem[] {
+    const input: OpenAIResponsesInputItem[] = []
+
+    if (systemPrompt) {
+      input.push({ role: "system", content: systemPrompt })
+    }
+
+    for (const msg of messages) {
+      if (msg.role === "system") {
+        input.push({
+          role: "system",
+          content: typeof msg.content === "string" ? msg.content : "",
+        })
+        continue
+      }
+
+      if (typeof msg.content === "string") {
+        if (msg.role === "user") {
+          input.push({
+            role: "user",
+            content: [{ type: "input_text", text: msg.content }],
+          })
+        } else {
+          input.push({
+            role: "assistant",
+            content: [{ type: "output_text", text: msg.content }],
+          })
+        }
+        continue
+      }
+
+      const userContent: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }> = []
+      const assistantContent: Array<{ type: "output_text"; text: string }> = []
+
+      for (const block of msg.content as ContentBlock[]) {
+        if (block.type === "text") {
+          if (msg.role === "user") {
+            userContent.push({ type: "input_text", text: block.text })
+          } else if (msg.role === "assistant") {
+            assistantContent.push({ type: "output_text", text: block.text })
+          }
+        } else if (block.type === "image" && msg.role === "user") {
+          if (block.source.type === "base64") {
+            userContent.push({
+              type: "input_image",
+              image_url: `data:${block.source.media_type};base64,${block.source.data}`,
+            })
+          } else if (block.source.type === "url") {
+            userContent.push({
+              type: "input_image",
+              image_url: block.source.url!,
+            })
+          }
+        } else if (block.type === "tool_use") {
+          input.push({
+            type: "function_call",
+            call_id: block.id,
+            name: block.name,
+            arguments: JSON.stringify(block.input),
+          })
+        } else if (block.type === "tool_result") {
+          input.push({
+            type: "function_call_output",
+            call_id: block.tool_use_id,
+            output: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
+          })
+        }
+      }
+
+      if (msg.role === "user" && userContent.length > 0) {
+        input.push({ role: "user", content: userContent })
+      } else if (msg.role === "assistant" && assistantContent.length > 0) {
+        input.push({ role: "assistant", content: assistantContent })
+      }
+    }
+
+    return input
+  }
+
+  private convertResponsesResponse(data: OpenAIResponsesResponse): LLMResponse {
+    const content: ContentBlock[] = []
+
+    for (const item of data.output ?? []) {
+      if (item.type === "message" && item.content) {
+        for (const part of item.content) {
+          if (part.type === "output_text") {
+            content.push({ type: "text", text: part.text })
+          }
+        }
+      } else if (item.type === "function_call" && item.call_id && item.name) {
+        content.push({
+          type: "tool_use",
+          id: item.call_id,
+          name: item.name,
+          input: item.arguments ? JSON.parse(item.arguments) : {},
+        })
+      }
+    }
+
+    return {
+      id: data.id,
+      model: data.model,
+      content,
+      stopReason: "end_turn",
+      stopSequence: null,
+      usage: {
+        input_tokens: data.usage?.input_tokens ?? 0,
+        output_tokens: data.usage?.output_tokens ?? 0,
+      },
+    }
+  }
+
+  private normalizeBaseUrl(baseUrl: string): string {
+    const trimmed = baseUrl.replace(/\/+$/, "")
+    try {
+      const url = new URL(trimmed)
+      const path = url.pathname.replace(/\/+$/, "")
+
+      if (path === "" || path === "/") {
+        url.pathname = "/v1"
+        return url.toString().replace(/\/+$/, "")
+      }
+
+      if (path.endsWith("/openai")) {
+        url.pathname = `${path}/v1`
+        return url.toString().replace(/\/+$/, "")
+      }
+
+      return url.toString().replace(/\/+$/, "")
+    } catch {
+      return trimmed
     }
   }
 
@@ -248,6 +496,15 @@ export class OpenAIProvider implements LLMProvider {
         description: tool.description,
         parameters: tool.inputSchema,
       },
+    }))
+  }
+
+  private convertResponsesTools(tools: ToolDefinition[]): OpenAIResponsesRequest["tools"] {
+    return tools.map((tool) => ({
+      type: "function" as const,
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
     }))
   }
 
@@ -510,6 +767,238 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
+  private createResponsesStreamIterator(
+    body: ReadableStream<Uint8Array>,
+    options?: StreamOptions
+  ): LLMStreamResponse {
+    const self = this
+
+    return {
+      async *[Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+        const reader = body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        let emittedMessageStart = false
+        let textBlockStarted = false
+        let finished = false
+        const toolCalls = new Map<
+          string,
+          { callId: string; name: string; arguments: string; blockIndex: number; done: boolean }
+        >()
+        let nextToolBlockIndex = 1
+
+        const ensureMessageStart = (id?: string, model?: string) => {
+          if (emittedMessageStart) return
+          emittedMessageStart = true
+          const startEvent: StreamEvent = {
+            type: "message_start",
+            message: {
+              id: id ?? "",
+              type: "message",
+              role: "assistant",
+              content: [],
+              model: model ?? "",
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 0, output_tokens: 0 },
+            },
+          }
+          options?.onEvent?.(startEvent)
+          return startEvent
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            buffer = lines.pop() || ""
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue
+              const data = line.slice(6).trim()
+              if (!data) continue
+              if (data === "[DONE]") {
+                if (!finished) {
+                  const stopEvent: StreamEvent = { type: "message_stop" }
+                  options?.onEvent?.(stopEvent)
+                  yield stopEvent
+                }
+                finished = true
+                continue
+              }
+
+              let payload: any
+              try {
+                payload = JSON.parse(data)
+              } catch {
+                continue
+              }
+
+              const type = payload?.type
+              if (type === "response.created") {
+                const startEvent = ensureMessageStart(payload.response?.id, payload.response?.model)
+                if (startEvent) yield startEvent
+                continue
+              }
+
+              if (!emittedMessageStart) {
+                const startEvent = ensureMessageStart(payload?.response?.id, payload?.response?.model)
+                if (startEvent) yield startEvent
+              }
+
+              if (type === "response.output_text.delta") {
+                if (!textBlockStarted) {
+                  textBlockStarted = true
+                  const startText: StreamEvent = {
+                    type: "content_block_start",
+                    index: 0,
+                    content_block: { type: "text", text: "" },
+                  }
+                  options?.onEvent?.(startText)
+                  yield startText
+                }
+
+                const textDelta = payload.delta ?? ""
+                if (textDelta) {
+                  const textEvent: StreamEvent = {
+                    type: "content_block_delta",
+                    index: 0,
+                    delta: { type: "text_delta", text: textDelta },
+                  }
+                  options?.onText?.(textDelta)
+                  options?.onEvent?.(textEvent)
+                  yield textEvent
+                }
+              } else if (type === "response.output_item.added") {
+                const item = payload.item
+                if (item?.type === "function_call") {
+                  const blockIndex = nextToolBlockIndex++
+                  const callId = item.call_id ?? item.id ?? ""
+                  toolCalls.set(item.id, {
+                    callId,
+                    name: item.name ?? "",
+                    arguments: item.arguments ?? "",
+                    blockIndex,
+                    done: false,
+                  })
+
+                  const startEvent: StreamEvent = {
+                    type: "content_block_start",
+                    index: blockIndex,
+                    content_block: {
+                      type: "tool_use",
+                      id: callId,
+                      name: item.name ?? "",
+                      input: {},
+                    },
+                  }
+                  options?.onEvent?.(startEvent)
+                  yield startEvent
+
+                  if (item.arguments) {
+                    const deltaEvent: StreamEvent = {
+                      type: "content_block_delta",
+                      index: blockIndex,
+                      delta: {
+                        type: "input_json_delta",
+                        partial_json: item.arguments,
+                      },
+                    }
+                    options?.onEvent?.(deltaEvent)
+                    yield deltaEvent
+                  }
+                }
+              } else if (type === "response.function_call_arguments.delta") {
+                const entry = toolCalls.get(payload.item_id)
+                if (entry && payload.delta) {
+                  entry.arguments += payload.delta
+                  const deltaEvent: StreamEvent = {
+                    type: "content_block_delta",
+                    index: entry.blockIndex,
+                    delta: { type: "input_json_delta", partial_json: payload.delta },
+                  }
+                  options?.onEvent?.(deltaEvent)
+                  yield deltaEvent
+                }
+              } else if (type === "response.output_item.done") {
+                const item = payload.item
+                if (item?.type === "function_call") {
+                  const entry = toolCalls.get(item.id)
+                  if (entry && !entry.done) {
+                    entry.done = true
+                    const stopEvent: StreamEvent = {
+                      type: "content_block_stop",
+                      index: entry.blockIndex,
+                    }
+                    options?.onEvent?.(stopEvent)
+                    yield stopEvent
+
+                    try {
+                      const input = entry.arguments ? JSON.parse(entry.arguments) : {}
+                      options?.onToolUse?.({ id: entry.callId, name: entry.name, input })
+                    } catch {
+                      options?.onToolUse?.({ id: entry.callId, name: entry.name, input: {} })
+                    }
+                  }
+                }
+              } else if (type === "response.completed" || type === "response.incomplete") {
+                finished = true
+
+                if (textBlockStarted) {
+                  const stopText: StreamEvent = { type: "content_block_stop", index: 0 }
+                  options?.onEvent?.(stopText)
+                  yield stopText
+                }
+
+                for (const entry of toolCalls.values()) {
+                  if (entry.done) continue
+                  entry.done = true
+                  const stopEvent: StreamEvent = {
+                    type: "content_block_stop",
+                    index: entry.blockIndex,
+                  }
+                  options?.onEvent?.(stopEvent)
+                  yield stopEvent
+
+                  try {
+                    const input = entry.arguments ? JSON.parse(entry.arguments) : {}
+                    options?.onToolUse?.({ id: entry.callId, name: entry.name, input })
+                  } catch {
+                    options?.onToolUse?.({ id: entry.callId, name: entry.name, input: {} })
+                  }
+                }
+
+                const finishReason = payload.response?.incomplete_details?.reason
+                const messageDelta: StreamEvent = {
+                  type: "message_delta",
+                  delta: {
+                    stop_reason: self.convertResponsesStopReason(finishReason),
+                    stop_sequence: null,
+                  },
+                  usage: {
+                    output_tokens: payload.response?.usage?.output_tokens ?? 0,
+                    input_tokens: payload.response?.usage?.input_tokens ?? 0,
+                  },
+                }
+                options?.onEvent?.(messageDelta)
+                yield messageDelta
+
+                const stopEvent: StreamEvent = { type: "message_stop" }
+                options?.onEvent?.(stopEvent)
+                yield stopEvent
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock()
+        }
+      },
+    }
+  }
+
   /**
    * Get request headers
    */
@@ -524,6 +1013,13 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     return headers
+  }
+
+  private convertResponsesStopReason(reason?: string): StopReason {
+    if (reason === "max_output_tokens") {
+      return "max_tokens"
+    }
+    return "end_turn"
   }
 }
 

@@ -3,6 +3,7 @@
  * @module formagent-sdk/session/storage
  */
 
+import path from "path"
 import type { SessionState, SessionStorage } from "../types/session"
 
 /**
@@ -82,7 +83,19 @@ export class FileSessionStorage implements SessionStorage {
   }
 
   private getFilePath(sessionId: string): string {
-    return `${this.directory}/${sessionId}.json`
+    if (!sessionId || sessionId.trim() === "") {
+      throw new Error("Session ID must be non-empty")
+    }
+
+    const baseDir = path.resolve(this.directory)
+    const filePath = path.resolve(baseDir, `${sessionId}.json`)
+    const expectedPrefix = baseDir.endsWith(path.sep) ? baseDir : `${baseDir}${path.sep}`
+
+    if (!filePath.startsWith(expectedPrefix)) {
+      throw new Error(`Invalid session ID: "${sessionId}"`)
+    }
+
+    return filePath
   }
 
   async save(state: SessionState): Promise<void> {

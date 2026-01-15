@@ -196,6 +196,25 @@ export const DEFAULT_PRICING: PricingConfig = {
         cacheWritePricePerMillion: 3.75,
         cacheReadPricePerMillion: 0.3,
       },
+      // OpenCode Zen pricing (<=200K tier) for Claude 4.5 models
+      "claude-sonnet-4.5": {
+        inputPricePerMillion: 3.0,
+        outputPricePerMillion: 15.0,
+        cacheWritePricePerMillion: 3.75,
+        cacheReadPricePerMillion: 0.3,
+      },
+      "claude-haiku-4.5": {
+        inputPricePerMillion: 1.0,
+        outputPricePerMillion: 5.0,
+        cacheWritePricePerMillion: 1.25,
+        cacheReadPricePerMillion: 0.1,
+      },
+      "claude-opus-4.5": {
+        inputPricePerMillion: 5.0,
+        outputPricePerMillion: 25.0,
+        cacheWritePricePerMillion: 6.25,
+        cacheReadPricePerMillion: 0.5,
+      },
     },
     openai: {
       "gpt-4-turbo": {
@@ -213,6 +232,47 @@ export const DEFAULT_PRICING: PricingConfig = {
       "gpt-3.5-turbo": {
         inputPricePerMillion: 0.5,
         outputPricePerMillion: 1.5,
+      },
+      // OpenCode Zen pricing for GPT-5 series
+      "gpt-5.2": {
+        inputPricePerMillion: 1.75,
+        outputPricePerMillion: 14.0,
+        cacheReadPricePerMillion: 0.175,
+      },
+      "gpt-5.1": {
+        inputPricePerMillion: 1.07,
+        outputPricePerMillion: 8.5,
+        cacheReadPricePerMillion: 0.107,
+      },
+      "gpt-5.1-codex": {
+        inputPricePerMillion: 1.07,
+        outputPricePerMillion: 8.5,
+        cacheReadPricePerMillion: 0.107,
+      },
+      "gpt-5.1-codex-max": {
+        inputPricePerMillion: 1.25,
+        outputPricePerMillion: 10.0,
+        cacheReadPricePerMillion: 0.125,
+      },
+      "gpt-5.1-codex-mini": {
+        inputPricePerMillion: 0.25,
+        outputPricePerMillion: 2.0,
+        cacheReadPricePerMillion: 0.025,
+      },
+      "gpt-5": {
+        inputPricePerMillion: 1.07,
+        outputPricePerMillion: 8.5,
+        cacheReadPricePerMillion: 0.107,
+      },
+      "gpt-5-codex": {
+        inputPricePerMillion: 1.07,
+        outputPricePerMillion: 8.5,
+        cacheReadPricePerMillion: 0.107,
+      },
+      "gpt-5-nano": {
+        inputPricePerMillion: 0,
+        outputPricePerMillion: 0,
+        cacheReadPricePerMillion: 0,
       },
     },
     deepseek: {

@@ -9,6 +9,8 @@ import { join } from "node:path"
 import { existsSync } from "node:fs"
 
 import { createSession } from "../api"
+import { AnthropicProvider } from "../llm/anthropic"
+import { OpenAIProvider } from "../llm/openai"
 import { builtinTools } from "../tools"
 import { getTodos, clearTodos, setTodoChangeCallback } from "../tools/builtin/todo"
 import { SkillLoader } from "../skills/loader"
@@ -58,6 +60,8 @@ let session: Session | null = null
 let totalInputTokens = 0
 let totalOutputTokens = 0
 let messageCount = 0
+let currentProviderId: "anthropic" | "openai" | null = null
+let currentModelOverride: string | null = null
 
 /**
  * Check if a directory is a git repository
@@ -124,6 +128,7 @@ ${c.bold("Interactive Commands:")}
   ${c.cyan("/clear")}    Clear conversation history
   ${c.cyan("/tools")}    List available tools
   ${c.cyan("/skills")}   List available skills
+  ${c.cyan("/models")}   Show or switch provider/model
   ${c.cyan("/todos")}    Show current todo list
   ${c.cyan("/usage")}    Show token usage statistics
   ${c.cyan("/debug")}    Show debug info (prompt, model, env)
@@ -133,7 +138,7 @@ ${c.bold("Environment:")}
   ${c.cyan("ANTHROPIC_API_KEY")}   Anthropic API key (for Claude models)
   ${c.cyan("ANTHROPIC_MODEL")}     Optional. Claude model (default: claude-sonnet-4-20250514)
   ${c.cyan("OPENAI_API_KEY")}      OpenAI API key (for GPT models)
-  ${c.cyan("OPENAI_MODEL")}        Optional. OpenAI model (default: gpt-4o)
+  ${c.cyan("OPENAI_MODEL")}        Optional. OpenAI model (default: gpt-5.2)
   ${c.cyan("OPENAI_BASE_URL")}     Optional. Custom OpenAI-compatible API URL
 
 ${c.bold("Examples:")}
@@ -159,7 +164,7 @@ function printVersion() {
  * Print welcome banner
  */
 function printBanner() {
-  const model = getDefaultModel()
+  const model = getActiveModel()
   console.log()
   console.log(c.cyan("╔═══════════════════════════════════════════════════════════╗"))
   console.log(c.cyan("║") + c.bold("              FormAgent CLI v" + VERSION + "                     ") + c.cyan("║"))
@@ -167,6 +172,7 @@ function printBanner() {
   console.log(c.cyan("╚═══════════════════════════════════════════════════════════╝"))
   console.log()
   console.log(c.dim("  Model: ") + c.green(model))
+  console.log(c.dim("  Provider: ") + c.green(getActiveProviderId() ?? "auto"))
   console.log(c.dim("  Type your message and press Enter to chat."))
   console.log(c.dim("  Use /help for commands, /exit to quit."))
   console.log()
@@ -183,6 +189,7 @@ function printInteractiveHelp() {
   console.log(`  ${c.cyan("/clear")}    Clear conversation history`)
   console.log(`  ${c.cyan("/tools")}    List available tools`)
   console.log(`  ${c.cyan("/skills")}   List available skills`)
+  console.log(`  ${c.cyan("/models")}   Show or switch provider/model`)
   console.log(`  ${c.cyan("/todos")}    Show current todo list`)
   console.log(`  ${c.cyan("/usage")}    Show token usage statistics`)
   console.log(`  ${c.cyan("/debug")}    Show debug info (prompt, model, env)`)
@@ -277,11 +284,95 @@ function printUsage() {
   console.log()
 }
 
+async function resetSessionForModelChange(): Promise<void> {
+  if (session) {
+    await session.close()
+    session = null
+  }
+  totalInputTokens = 0
+  totalOutputTokens = 0
+  messageCount = 0
+}
+
+function printModelsHelp() {
+  const provider = getActiveProviderId() ?? "auto"
+  const model = getActiveModel()
+
+  console.log()
+  console.log(c.bold("Model Selection:"))
+  console.log()
+  console.log(`  ${c.cyan("Current provider:")} ${provider}`)
+  console.log(`  ${c.cyan("Current model:")}    ${model}`)
+  console.log()
+  console.log(c.bold("Usage:"))
+  console.log(`  ${c.cyan("/models")}`)
+  console.log(`  ${c.cyan("/models")} openai gpt-5-mini`)
+  console.log(`  ${c.cyan("/models")} anthropic claude-sonnet-4-20250514`)
+  console.log(`  ${c.cyan("/models")} gpt-5.2`)
+  console.log(`  ${c.cyan("/models")} reset`)
+  console.log()
+}
+
+async function handleModelsCommand(args: string[]): Promise<void> {
+  if (args.length === 0) {
+    printModelsHelp()
+    return
+  }
+
+  if (args[0].toLowerCase() === "reset") {
+    currentProviderId = null
+    currentModelOverride = null
+    await resetSessionForModelChange()
+    console.log(c.green("\n  ✓ Model selection reset to environment defaults.\n"))
+    return
+  }
+
+  if (args.length === 1) {
+    const provider = parseProvider(args[0])
+    if (provider) {
+      currentProviderId = provider
+      currentModelOverride = null
+      await resetSessionForModelChange()
+      console.log(
+        c.green(`\n  ✓ Provider set to ${provider}. Model: ${getActiveModel()}.\n`)
+      )
+      return
+    }
+
+    currentModelOverride = args[0]
+    currentProviderId = inferProviderFromModel(args[0]) ?? currentProviderId
+    await resetSessionForModelChange()
+    console.log(
+      c.green(`\n  ✓ Model set to ${currentModelOverride} (provider: ${getActiveProviderId() ?? "auto"}).\n`)
+    )
+    return
+  }
+
+  const provider = parseProvider(args[0])
+  if (!provider) {
+    console.log(c.yellow(`\n  Unknown provider: ${args[0]}. Use "openai" or "anthropic".\n`))
+    return
+  }
+
+  const model = args.slice(1).join(" ")
+  if (!model) {
+    console.log(c.yellow("\n  Missing model name. Example: /models openai gpt-5-mini\n"))
+    return
+  }
+
+  currentProviderId = provider
+  currentModelOverride = model
+  await resetSessionForModelChange()
+  console.log(
+    c.green(`\n  ✓ Provider set to ${provider}, model set to ${model}.\n`)
+  )
+}
+
 /**
  * Print debug information
  */
 function printDebug() {
-  const model = getDefaultModel()
+  const model = getActiveModel()
   const tools = getAllTools()
   const systemPrompt = buildSystemPrompt()
   const cwd = process.cwd()
@@ -295,6 +386,8 @@ function printDebug() {
   // Model info
   console.log(c.bold("Model:"))
   console.log(`  ${c.cyan("Current:")}        ${model}`)
+  console.log(`  ${c.cyan("Provider:")}       ${getActiveProviderId() ?? "auto"}`)
+  console.log(`  ${c.cyan("Override:")}       ${currentModelOverride ?? c.dim("(not set)")}`)
   console.log(`  ${c.cyan("ANTHROPIC_MODEL:")} ${process.env.ANTHROPIC_MODEL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("OPENAI_MODEL:")}    ${process.env.OPENAI_MODEL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("OPENAI_BASE_URL:")} ${process.env.OPENAI_BASE_URL || c.dim("(not set)")}`)
@@ -384,15 +477,74 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 /**
  * Get the default model based on environment
  */
-function getDefaultModel(): string {
-  // Select based on API key and provider-specific model env var
+function getDefaultProviderFromEnv(): "anthropic" | "openai" | null {
   if (process.env.ANTHROPIC_API_KEY) {
-    return process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
+    return "anthropic"
   }
   if (process.env.OPENAI_API_KEY) {
-    return process.env.OPENAI_MODEL || "gpt-4o"
+    return "openai"
   }
-  return "claude-sonnet-4-20250514" // fallback
+  return null
+}
+
+function inferProviderFromModel(model: string): "anthropic" | "openai" | null {
+  const normalized = model.toLowerCase()
+  if (normalized.startsWith("claude")) {
+    return "anthropic"
+  }
+  if (normalized.startsWith("gpt") || normalized.startsWith("o1") || normalized.startsWith("chatgpt")) {
+    return "openai"
+  }
+  return null
+}
+
+function getDefaultModelForProvider(providerId: "anthropic" | "openai"): string {
+  if (providerId === "anthropic") {
+    return process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
+  }
+  return process.env.OPENAI_MODEL || "gpt-5.2"
+}
+
+function getActiveProviderId(): "anthropic" | "openai" | null {
+  if (currentProviderId) {
+    return currentProviderId
+  }
+  if (currentModelOverride) {
+    return inferProviderFromModel(currentModelOverride)
+  }
+  return getDefaultProviderFromEnv()
+}
+
+function getActiveModel(): string {
+  if (currentModelOverride) {
+    return currentModelOverride
+  }
+  const provider = getActiveProviderId()
+  if (provider) {
+    return getDefaultModelForProvider(provider)
+  }
+  return "claude-sonnet-4-20250514"
+}
+
+function parseProvider(arg: string): "anthropic" | "openai" | null {
+  const normalized = arg.toLowerCase()
+  if (normalized === "anthropic" || normalized === "claude") {
+    return "anthropic"
+  }
+  if (normalized === "openai" || normalized === "gpt") {
+    return "openai"
+  }
+  return null
+}
+
+function createProvider(providerId: "anthropic" | "openai") {
+  if (providerId === "anthropic") {
+    return new AnthropicProvider()
+  }
+  return new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseUrl: process.env.OPENAI_BASE_URL,
+  })
 }
 
 /**
@@ -400,8 +552,11 @@ function getDefaultModel(): string {
  */
 async function getSession(): Promise<Session> {
   if (!session) {
+    const providerId = getActiveProviderId()
+    const provider = providerId ? createProvider(providerId) : undefined
     session = await createSession({
-      model: getDefaultModel(),
+      model: getActiveModel(),
+      provider,
       tools: getAllTools(),
       systemPrompt: buildSystemPrompt(),
     })
@@ -471,7 +626,9 @@ async function handleInput(input: string): Promise<boolean> {
 
   // Slash commands
   if (trimmed.startsWith("/")) {
-    const cmd = trimmed.toLowerCase()
+    const parts = trimmed.split(/\s+/)
+    const cmd = parts[0].toLowerCase()
+    const args = parts.slice(1)
 
     switch (cmd) {
       case "/help":
@@ -496,6 +653,10 @@ async function handleInput(input: string): Promise<boolean> {
 
       case "/skills":
         await printSkills()
+        return true
+
+      case "/models":
+        await handleModelsCommand(args)
         return true
 
       case "/todos":

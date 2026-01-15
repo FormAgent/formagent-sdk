@@ -823,6 +823,22 @@ describe("FileSessionStorage", () => {
     updatedAt: Date.now(),
   })
 
+  describe("validation", () => {
+    it("should reject empty session ids", async () => {
+      await expect(storage.load("")).rejects.toThrow("Session ID must be non-empty")
+      await expect(storage.delete("")).rejects.toThrow("Session ID must be non-empty")
+      await expect(storage.save(createTestState(""))).rejects.toThrow(
+        "Session ID must be non-empty"
+      )
+    })
+
+    it("should reject path traversal session ids", async () => {
+      await expect(storage.load("../evil")).rejects.toThrow("Invalid session ID")
+      await expect(storage.delete("../evil")).rejects.toThrow("Invalid session ID")
+      await expect(storage.save(createTestState("../evil"))).rejects.toThrow("Invalid session ID")
+    })
+  })
+
   describe("save()", () => {
     it("should save session to file", async () => {
       const state = createTestState("session1")

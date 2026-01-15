@@ -250,6 +250,7 @@ export interface OpenAIRequest {
     }>
   }>
   max_tokens?: number
+  max_completion_tokens?: number
   temperature?: number
   top_p?: number
   stop?: string[]
