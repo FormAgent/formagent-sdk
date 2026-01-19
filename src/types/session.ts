@@ -39,6 +39,8 @@ export interface SessionConfig {
   storage?: SessionStorage
   /** Working directory for file operations */
   cwd?: string
+  /** Temp directory for truncated output files (defaults to system temp) */
+  tempDir?: string
   /** Enable cost tracking */
   trackCost?: boolean
   /** Hooks configuration for intercepting agent behavior */

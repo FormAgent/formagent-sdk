@@ -564,7 +564,8 @@ export class SessionImpl implements Session {
 
       // Apply output truncation to prevent token explosion
       if (needsTruncation(content)) {
-        content = await truncateToolOutput(content)
+        const truncationConfig = this.config.tempDir ? { tempDir: this.config.tempDir } : undefined
+        content = await truncateToolOutput(content, truncationConfig)
       }
 
       toolResponse = toolResult
