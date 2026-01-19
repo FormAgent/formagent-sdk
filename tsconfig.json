@@ -13,8 +13,8 @@
     "declaration": true,
     "declarationMap": true,
     "outDir": "./dist",
-    "rootDir": "packages/formagent-sdk/src"
+    "rootDir": "./src"
   },
-  "include": ["packages/formagent-sdk/src/**/*"],
-  "exclude": ["node_modules", "dist", "packages/formagent-sdk/src/loop/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/loop/**/*"]
 }

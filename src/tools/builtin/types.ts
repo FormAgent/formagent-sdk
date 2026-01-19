@@ -235,6 +235,8 @@ export interface BuiltinToolOptions {
   cwd?: string
   /** Default timeout for commands (ms) */
   defaultTimeout?: number
+  /** Idle timeout for Bash commands (ms) - kills command if no output for this duration */
+  idleTimeout?: number
   /** Maximum file size to read (bytes) */
   maxFileSize?: number
   /** Allowed directories for file operations */

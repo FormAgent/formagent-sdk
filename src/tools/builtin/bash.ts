@@ -9,6 +9,7 @@ import type { BashInput, BuiltinToolOptions } from "./types"
 import { checkDirAccess } from "./path-guard"
 
 const DEFAULT_TIMEOUT = 120000 // 2 minutes
+const DEFAULT_IDLE_TIMEOUT = 30000 // 30 seconds - if no output for this long, assume waiting for input
 const MAX_OUTPUT_LENGTH = 100000
 const DEFAULT_BLOCKED_PATTERNS = [
   "\\bsudo\\b",
@@ -84,25 +85,47 @@ export function createBashTool(options: BuiltinToolOptions = {}): ToolDefinition
 
       // Validate timeout
       const actualTimeout = Math.min(timeout, 600000)
+      const idleTimeout = options.idleTimeout ?? DEFAULT_IDLE_TIMEOUT
 
       return new Promise((resolve) => {
         let stdout = ""
         let stderr = ""
         let killed = false
+        let killedReason: "timeout" | "idle" | null = null
+        let lastOutputTime = Date.now()
 
         const proc: ChildProcess = spawn("bash", ["-c", command], {
           cwd: cwdAccess.resolved,
           env: process.env,
           shell: false,
+          stdio: ["ignore", "pipe", "pipe"], // Explicitly ignore stdin
         })
 
+        // Main timeout timer
         const timer = setTimeout(() => {
           killed = true
+          killedReason = "timeout"
           proc.kill("SIGTERM")
           setTimeout(() => proc.kill("SIGKILL"), 1000)
         }, actualTimeout)
 
+        // Idle timeout checker - detects when command is waiting for input
+        const idleChecker = setInterval(() => {
+          const idleTime = Date.now() - lastOutputTime
+          if (idleTime >= idleTimeout && !killed) {
+            killed = true
+            killedReason = "idle"
+            proc.kill("SIGTERM")
+            setTimeout(() => proc.kill("SIGKILL"), 1000)
+          }
+        }, 1000) // Check every second
+
+        const updateLastOutputTime = () => {
+          lastOutputTime = Date.now()
+        }
+
         proc.stdout?.on("data", (data: Buffer) => {
+          updateLastOutputTime()
           stdout += data.toString()
           if (stdout.length > MAX_OUTPUT_LENGTH) {
             stdout = stdout.slice(0, MAX_OUTPUT_LENGTH) + "\n... (output truncated)"
@@ -111,6 +134,7 @@ export function createBashTool(options: BuiltinToolOptions = {}): ToolDefinition
         })
 
         proc.stderr?.on("data", (data: Buffer) => {
+          updateLastOutputTime()
           stderr += data.toString()
           if (stderr.length > MAX_OUTPUT_LENGTH) {
             stderr = stderr.slice(0, MAX_OUTPUT_LENGTH) + "\n... (output truncated)"
@@ -119,12 +143,20 @@ export function createBashTool(options: BuiltinToolOptions = {}): ToolDefinition
 
         proc.on("close", (code: number | null) => {
           clearTimeout(timer)
+          clearInterval(idleChecker)
 
           if (killed) {
-            resolve({
-              content: `Command timed out after ${actualTimeout}ms\n\nPartial output:\n${stdout}\n\nStderr:\n${stderr}`,
-              isError: true,
-            })
+            if (killedReason === "idle") {
+              resolve({
+                content: `Command terminated: no output for ${idleTimeout / 1000} seconds (likely waiting for input)\n\nPartial output:\n${stdout}\n\nStderr:\n${stderr}`,
+                isError: true,
+              })
+            } else {
+              resolve({
+                content: `Command timed out after ${actualTimeout}ms\n\nPartial output:\n${stdout}\n\nStderr:\n${stderr}`,
+                isError: true,
+              })
+            }
             return
           }
 
@@ -144,6 +176,7 @@ export function createBashTool(options: BuiltinToolOptions = {}): ToolDefinition
 
         proc.on("error", (error: Error) => {
           clearTimeout(timer)
+          clearInterval(idleChecker)
           resolve({
             content: `Failed to execute command: ${error.message}`,
             isError: true,
