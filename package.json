@@ -38,6 +38,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "clean": "rm -rf dist",
+    "prepare": "bun run build",
     "prepublishOnly": "bun run clean && bun run build",
     "cli": "bun run ./src/cli/index.ts"
   },
