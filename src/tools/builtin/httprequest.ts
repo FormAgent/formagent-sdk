@@ -284,7 +284,7 @@ ${responseText}`
           metadata: {
             status: response.status,
             statusText: response.statusText,
-            headers: Object.fromEntries(response.headers.entries()),
+            headers: Object.fromEntries(response.headers as unknown as Iterable<[string, string]>),
             body: responseBody,
           },
         }

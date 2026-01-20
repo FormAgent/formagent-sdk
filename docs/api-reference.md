@@ -5,6 +5,7 @@ Complete API documentation for `formagent-sdk`.
 ## Table of Contents
 
 - [Session API](#session-api)
+- [Session Storage API](#session-storage-api)
 - [Prompt API](#prompt-api)
 - [Tool API](#tool-api)
 - [MCP API](#mcp-api)
@@ -175,6 +176,118 @@ const forkedSession = await forkSession("sess_abc123", {
 ```
 
 **Returns:** `Promise<Session>`
+
+---
+
+## Session Storage API
+
+### `MemorySessionStorage`
+
+In-memory storage (default). Data is lost when the process exits.
+
+```typescript
+import { MemorySessionStorage } from "formagent-sdk"
+
+const storage = new MemorySessionStorage()
+
+// Methods
+await storage.save(state)                    // Save session state
+await storage.load(sessionId)                // Load session state
+await storage.delete(sessionId)              // Delete session
+await storage.list()                         // List all session IDs
+storage.clear()                              // Clear all sessions
+storage.size()                               // Get count of stored sessions
+```
+
+---
+
+### `FileSessionStorage`
+
+File-based persistent storage. Sessions are saved as JSON files.
+
+```typescript
+import { FileSessionStorage } from "formagent-sdk"
+
+// Sessions stored as ./sessions/{session-id}.json
+const storage = new FileSessionStorage("./sessions")
+
+// Methods (same as MemorySessionStorage)
+await storage.save(state)
+await storage.load(sessionId)
+await storage.delete(sessionId)
+await storage.list()
+```
+
+**File Structure:**
+```
+./sessions/
+  ├── sess_abc123.json
+  ├── sess_def456.json
+  └── sess_ghi789.json
+```
+
+---
+
+### `setDefaultStorage(storage)`
+
+Set the global default storage for all sessions.
+
+```typescript
+import { setDefaultStorage, FileSessionStorage } from "formagent-sdk"
+
+// Set once at application startup
+setDefaultStorage(new FileSessionStorage("./sessions"))
+
+// All sessions now use file storage by default
+const session = await createSession({ model: "claude-sonnet-4-20250514" })
+```
+
+---
+
+### `createSessionStorage(type, options)`
+
+Factory function to create storage instances.
+
+```typescript
+import { createSessionStorage } from "formagent-sdk"
+
+// Memory storage (default)
+const memoryStorage = createSessionStorage("memory")
+
+// File storage
+const fileStorage = createSessionStorage("file", { directory: "./sessions" })
+```
+
+---
+
+### `SessionStorage` Interface
+
+Implement custom storage backends:
+
+```typescript
+interface SessionStorage {
+  save(state: SessionState): Promise<void>
+  load(sessionId: string): Promise<SessionState | undefined>
+  delete(sessionId: string): Promise<void>
+  list(): Promise<string[]>
+}
+```
+
+---
+
+### `SessionState`
+
+```typescript
+interface SessionState {
+  id: string                          // Unique session ID
+  messages: SDKMessage[]              // Conversation history
+  usage: ExtendedUsageInfo            // Accumulated token usage
+  metadata: Record<string, unknown>   // Custom metadata
+  createdAt: number                   // Creation timestamp (ms)
+  updatedAt: number                   // Last update timestamp (ms)
+  parentId?: string                   // Parent session ID (if forked)
+}
+```
 
 ---
 

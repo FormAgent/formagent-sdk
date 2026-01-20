@@ -228,6 +228,8 @@ for await (const event of session.receive()) {
 
 ## Session Management
 
+**Default Behavior:** Sessions use in-memory storage by default. Conversation history is lost when the process exits. Use `FileSessionStorage` for persistence across restarts.
+
 ### Persistent Sessions
 
 Enable session persistence with `FileSessionStorage`:

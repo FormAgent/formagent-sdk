@@ -226,9 +226,48 @@ Be concise and focus on best practices.`,
 })
 ```
 
+## Session Persistence
+
+By default, sessions are stored in memory and lost when the process exits. Use `FileSessionStorage` for persistence:
+
+```typescript
+import { createSession, FileSessionStorage, builtinTools } from "formagent-sdk"
+
+// Create persistent storage
+const storage = new FileSessionStorage("./sessions")
+
+// Create session with persistence
+const session = await createSession({
+  model: "claude-sonnet-4-20250514",
+  tools: builtinTools,
+  sessionStorage: storage,
+})
+
+// Save session ID for later
+console.log(`Session ID: ${session.id}`)
+
+// ... use the session ...
+
+await session.close()
+```
+
+### Resume a Session
+
+```typescript
+// Later, resume the session
+const session = await createSession({
+  sessionStorage: storage,
+  resume: "previous-session-id",
+})
+
+await session.send("Continue where we left off")
+```
+
+See [Session Storage](./session-storage.md) for more details.
+
 ## Next Steps
 
 - [API Reference](./api-reference.md) - Complete API documentation
+- [Session Storage](./session-storage.md) - Persistent session management
 - [Built-in Tools](./tools.md) - Detailed tool documentation
 - [MCP Servers](./mcp-servers.md) - Creating MCP servers
-- [Examples](./examples.md) - More code examples

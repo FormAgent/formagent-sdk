@@ -223,7 +223,7 @@ export function pruneToolOutputs(
   })
 
   return {
-    messages: prunedMessages,
+    messages: prunedMessages as SDKMessage[],
     removedCount: toPrune.length,
     tokensSaved: prunedTokens,
   }

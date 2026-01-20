@@ -6,9 +6,9 @@ Welcome to the documentation for `formagent-sdk`, a Claude Agent SDK compatible 
 
 - [Getting Started](./getting-started.md) - Quick start guide
 - [API Reference](./api-reference.md) - Complete API documentation
+- [Session Storage](./session-storage.md) - Persistent session management
 - [Built-in Tools](./tools.md) - File operations, bash, and more
 - [MCP Servers](./mcp-servers.md) - Model Context Protocol integration
-- [Examples](./examples.md) - Code examples and tutorials
 
 ## Quick Links
 
@@ -104,6 +104,9 @@ formagent-sdk
 │   ├── createSession()  # Create new sessions
 │   ├── send()          # Send messages
 │   └── receive()       # Stream responses
+├── Session Storage      # Persistence layer
+│   ├── MemorySessionStorage  # In-memory (default, non-persistent)
+│   └── FileSessionStorage    # File-based persistence
 ├── Tool System          # Tool execution
 │   ├── builtinTools    # Built-in tools (Bash, Read, Write, etc.)
 │   ├── tool()          # Tool definition helper
@@ -113,7 +116,8 @@ formagent-sdk
 │   └── MCPServerManager
 └── Providers            # LLM providers
     ├── AnthropicProvider
-    └── OpenAIProvider
+    ├── OpenAIProvider
+    └── GeminiProvider
 ```
 
 ## Support
