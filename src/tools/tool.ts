@@ -174,11 +174,15 @@ function isZodSchema<T>(schema: unknown): schema is ZodLikeSchema<T> {
  */
 export function zodToJsonSchema(zodSchema: ZodLikeSchema): JSONSchema {
   // Try to access Zod's internal shape
-  const shape = (zodSchema as any)._def?.shape
-  const typeName = (zodSchema as any)._def?.typeName
+  const def = (zodSchema as any)._def
+  const typeName = def?.typeName
 
-  if (typeName === "ZodObject" && shape) {
-    return objectShapeToJsonSchema(shape)
+  if (typeName === "ZodObject") {
+    // In Zod v3, shape can be a function or an object
+    const shape = typeof def.shape === 'function' ? def.shape() : def.shape
+    if (shape) {
+      return objectShapeToJsonSchema(shape)
+    }
   }
 
   // Fallback: return a generic object schema
@@ -198,17 +202,45 @@ function objectShapeToJsonSchema(shape: Record<string, any>): JSONSchema {
 
   for (const [key, value] of Object.entries(shape)) {
     const def = value?._def
-    const typeName = def?.typeName
+    let typeName = def?.typeName
 
-    // Get description
-    const description = def?.description
+    // Get description (may be at different levels depending on wrapping)
+    let description = def?.description
 
-    // Handle optional wrapper
+    // Handle optional/default wrappers - unwrap to get the inner type
     let innerDef = def
     let isOptional = false
-    if (typeName === "ZodOptional") {
-      isOptional = true
-      innerDef = def.innerType?._def
+
+    // Keep unwrapping until we get to the actual type
+    while (innerDef) {
+      const innerTypeName = innerDef.typeName
+
+      if (innerTypeName === "ZodOptional") {
+        isOptional = true
+        // Preserve description from outer wrapper if inner doesn't have one
+        if (!description && innerDef.description) {
+          description = innerDef.description
+        }
+        innerDef = innerDef.innerType?._def
+      } else if (innerTypeName === "ZodDefault") {
+        // Default values make the field optional from the caller's perspective
+        isOptional = true
+        if (!description && innerDef.description) {
+          description = innerDef.description
+        }
+        innerDef = innerDef.innerType?._def
+      } else if (innerTypeName === "ZodNullable") {
+        if (!description && innerDef.description) {
+          description = innerDef.description
+        }
+        innerDef = innerDef.innerType?._def
+      } else {
+        // Found the actual type, check for description
+        if (!description && innerDef.description) {
+          description = innerDef.description
+        }
+        break
+      }
     }
 
     // Convert type
@@ -251,8 +283,11 @@ function zodDefToJsonSchema(def: any): JSONSchema {
         type: "array",
         items: zodDefToJsonSchema(def.type?._def),
       }
-    case "ZodObject":
-      return objectShapeToJsonSchema(def.shape)
+    case "ZodObject": {
+      // In Zod v3, shape can be a function or an object
+      const shape = typeof def.shape === 'function' ? def.shape() : def.shape
+      return objectShapeToJsonSchema(shape)
+    }
     case "ZodLiteral":
       return { type: typeof def.value, enum: [def.value] }
     case "ZodUnion":
