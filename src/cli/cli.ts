@@ -72,7 +72,7 @@ let session: Session | null = null
 let totalInputTokens = 0
 let totalOutputTokens = 0
 let messageCount = 0
-let currentProviderId: "anthropic" | "openai" | "gemini" | null = null
+let currentProviderId: "anthropic" | "openai" | "gemini" | "antigravity" | null = null
 let currentModelOverride: string | null = null
 
 /**
@@ -147,14 +147,17 @@ ${c.bold("Interactive Commands:")}
   ${c.cyan("/exit")}     Exit the CLI
 
 ${c.bold("Environment:")}
-  ${c.cyan("ANTHROPIC_API_KEY")}   Anthropic API key (for Claude models)
-  ${c.cyan("ANTHROPIC_MODEL")}     Optional. Claude model (default: claude-sonnet-4-20250514)
-  ${c.cyan("GEMINI_API_KEY")}      Gemini API key (for Gemini models)
-  ${c.cyan("GEMINI_MODEL")}        Optional. Gemini model (default: gemini-1.5-pro)
-  ${c.cyan("GEMINI_BASE_URL")}     Optional. Custom Gemini API base URL
-  ${c.cyan("OPENAI_API_KEY")}      OpenAI API key (for GPT models)
-  ${c.cyan("OPENAI_MODEL")}        Optional. OpenAI model (default: gpt-5.2)
-  ${c.cyan("OPENAI_BASE_URL")}     Optional. Custom OpenAI-compatible API URL
+  ${c.cyan("ANTHROPIC_API_KEY")}     Anthropic API key (for Claude models)
+  ${c.cyan("ANTHROPIC_MODEL")}       Optional. Claude model (default: claude-sonnet-4-20250514)
+  ${c.cyan("GEMINI_API_KEY")}        Gemini API key (for Gemini models)
+  ${c.cyan("GEMINI_MODEL")}          Optional. Gemini model (default: gemini-1.5-pro)
+  ${c.cyan("GEMINI_BASE_URL")}       Optional. Custom Gemini API base URL
+  ${c.cyan("OPENAI_API_KEY")}        OpenAI API key (for GPT models)
+  ${c.cyan("OPENAI_MODEL")}          Optional. OpenAI model (default: gpt-5.2)
+  ${c.cyan("OPENAI_BASE_URL")}       Optional. Custom OpenAI-compatible API URL
+  ${c.cyan("ANTIGRAVITY_API_KEY")}   Antigravity API key (default: sk-antigravity)
+  ${c.cyan("ANTIGRAVITY_MODEL")}     Optional. Antigravity model (default: gemini-3-flash)
+  ${c.cyan("ANTIGRAVITY_BASE_URL")}  Optional. Antigravity gateway URL (default: http://127.0.0.1:8045)
 
 ${c.bold("Examples:")}
   ${c.dim("# Start interactive mode")}
@@ -325,6 +328,7 @@ function printModelsHelp() {
   console.log(`  ${c.cyan("/models")} openai gpt-5-mini`)
   console.log(`  ${c.cyan("/models")} anthropic claude-sonnet-4-20250514`)
   console.log(`  ${c.cyan("/models")} gemini gemini-1.5-pro`)
+  console.log(`  ${c.cyan("/models")} antigravity gemini-3-flash`)
   console.log(`  ${c.cyan("/models")} gpt-5.2`)
   console.log(`  ${c.cyan("/models")} reset`)
   console.log()
@@ -367,7 +371,7 @@ async function handleModelsCommand(args: string[]): Promise<void> {
 
   const provider = parseProvider(args[0])
   if (!provider) {
-    console.log(c.yellow(`\n  Unknown provider: ${args[0]}. Use "openai", "anthropic", or "gemini".\n`))
+    console.log(c.yellow(`\n  Unknown provider: ${args[0]}. Use "openai", "anthropic", "gemini", or "antigravity".\n`))
     return
   }
 
@@ -534,6 +538,39 @@ async function listGeminiModels(): Promise<void> {
   console.log()
 }
 
+async function listAntigravityModels(): Promise<void> {
+  const config = getAntigravityConfig()
+  const baseUrl = `${config.baseUrl}/v1`
+
+  console.log(c.bold("Antigravity Models:"))
+  console.log(c.dim("  API Type: openai-compatible (Antigravity Gateway)"))
+  console.log(c.dim(`  Base URL: ${baseUrl}`))
+  console.log(c.dim(`  Default Model: ${config.model}`))
+
+  const res = await fetch(`${baseUrl}/models`, {
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "x-api-key": config.apiKey,
+    },
+  })
+
+  if (!res.ok) {
+    console.log(c.red(`  ✗ Failed to fetch models (${res.status})`))
+    console.log(c.dim(`  URL: ${baseUrl}/models`))
+    console.log(c.dim("  Make sure Antigravity Manager is running"))
+    console.log()
+    return
+  }
+
+  const payload = (await res.json()) as { data?: Array<{ id: string; owned_by?: string }> }
+  const items = payload.data ?? []
+  for (const item of items) {
+    const owner = item.owned_by ? ` (${item.owned_by})` : ""
+    console.log(`  ${c.green("●")} ${item.id}${owner}`)
+  }
+  console.log()
+}
+
 async function listModelsSummary(): Promise<void> {
   const provider = getActiveProviderId()
   const apiType = provider ?? "auto"
@@ -556,6 +593,13 @@ async function listModelsSummary(): Promise<void> {
     await listGeminiModels()
   } catch (error) {
     console.log(c.red(`  ✗ Gemini: ${error instanceof Error ? error.message : String(error)}`))
+    console.log()
+  }
+
+  try {
+    await listAntigravityModels()
+  } catch (error) {
+    console.log(c.red(`  ✗ Antigravity: ${error instanceof Error ? error.message : String(error)}`))
     console.log()
   }
 
@@ -585,8 +629,10 @@ function printDebug() {
   console.log(`  ${c.cyan("ANTHROPIC_MODEL:")} ${process.env.ANTHROPIC_MODEL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("GEMINI_MODEL:")}    ${process.env.GEMINI_MODEL || c.dim("(not set)")}`)
   console.log(`  ${c.cyan("GEMINI_BASE_URL:")} ${process.env.GEMINI_BASE_URL || c.dim("(not set)")}`)
-  console.log(`  ${c.cyan("OPENAI_MODEL:")}    ${process.env.OPENAI_MODEL || c.dim("(not set)")}`)
-  console.log(`  ${c.cyan("OPENAI_BASE_URL:")} ${process.env.OPENAI_BASE_URL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("OPENAI_MODEL:")}       ${process.env.OPENAI_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("OPENAI_BASE_URL:")}    ${process.env.OPENAI_BASE_URL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("ANTIGRAVITY_MODEL:")}  ${process.env.ANTIGRAVITY_MODEL || c.dim("(not set)")}`)
+  console.log(`  ${c.cyan("ANTIGRAVITY_BASE_URL:")} ${process.env.ANTIGRAVITY_BASE_URL || c.dim("(not set)")}`)
   console.log()
 
   // API Keys (masked)
@@ -594,9 +640,11 @@ function printDebug() {
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
   const openaiKey = process.env.OPENAI_API_KEY
-  console.log(`  ${c.cyan("ANTHROPIC_API_KEY:")} ${anthropicKey ? c.green("✓ set") + c.dim(` (${anthropicKey.slice(0, 8)}...${anthropicKey.slice(-4)})`) : c.red("✗ not set")}`)
-  console.log(`  ${c.cyan("GEMINI_API_KEY:")}    ${geminiKey ? c.green("✓ set") + c.dim(` (${geminiKey.slice(0, 8)}...${geminiKey.slice(-4)})`) : c.red("✗ not set")}`)
-  console.log(`  ${c.cyan("OPENAI_API_KEY:")}    ${openaiKey ? c.green("✓ set") + c.dim(` (${openaiKey.slice(0, 8)}...${openaiKey.slice(-4)})`) : c.red("✗ not set")}`)
+  const antigravityKey = process.env.ANTIGRAVITY_API_KEY
+  console.log(`  ${c.cyan("ANTHROPIC_API_KEY:")}   ${anthropicKey ? c.green("✓ set") + c.dim(` (${anthropicKey.slice(0, 8)}...${anthropicKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log(`  ${c.cyan("GEMINI_API_KEY:")}      ${geminiKey ? c.green("✓ set") + c.dim(` (${geminiKey.slice(0, 8)}...${geminiKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log(`  ${c.cyan("OPENAI_API_KEY:")}      ${openaiKey ? c.green("✓ set") + c.dim(` (${openaiKey.slice(0, 8)}...${openaiKey.slice(-4)})`) : c.red("✗ not set")}`)
+  console.log(`  ${c.cyan("ANTIGRAVITY_API_KEY:")} ${antigravityKey ? c.green("✓ set") + c.dim(` (${antigravityKey.slice(0, 8)}...${antigravityKey.slice(-4)})`) : c.dim("(default: sk-antigravity)")}`)
   console.log()
 
   // Environment
@@ -675,7 +723,11 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 /**
  * Get the default model based on environment
  */
-function getDefaultProviderFromEnv(): "anthropic" | "openai" | "gemini" | null {
+function getDefaultProviderFromEnv(): "anthropic" | "openai" | "gemini" | "antigravity" | null {
+  // Check for explicit Antigravity configuration first
+  if (process.env.ANTIGRAVITY_API_KEY || process.env.ANTIGRAVITY_BASE_URL) {
+    return "antigravity"
+  }
   if (process.env.ANTHROPIC_API_KEY) {
     return "anthropic"
   }
@@ -702,17 +754,20 @@ function inferProviderFromModel(model: string): "anthropic" | "openai" | "gemini
   return null
 }
 
-function getDefaultModelForProvider(providerId: "anthropic" | "openai" | "gemini"): string {
+function getDefaultModelForProvider(providerId: "anthropic" | "openai" | "gemini" | "antigravity"): string {
   if (providerId === "anthropic") {
     return process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
   }
   if (providerId === "gemini") {
     return process.env.GEMINI_MODEL || "gemini-1.5-pro"
   }
+  if (providerId === "antigravity") {
+    return process.env.ANTIGRAVITY_MODEL || "gemini-3-flash"
+  }
   return process.env.OPENAI_MODEL || "gpt-5.2"
 }
 
-function getActiveProviderId(): "anthropic" | "openai" | "gemini" | null {
+function getActiveProviderId(): "anthropic" | "openai" | "gemini" | "antigravity" | null {
   if (currentProviderId) {
     return currentProviderId
   }
@@ -733,7 +788,7 @@ function getActiveModel(): string {
   return "claude-sonnet-4-20250514"
 }
 
-function parseProvider(arg: string): "anthropic" | "openai" | "gemini" | null {
+function parseProvider(arg: string): "anthropic" | "openai" | "gemini" | "antigravity" | null {
   const normalized = arg.toLowerCase()
   if (normalized === "anthropic" || normalized === "claude") {
     return "anthropic"
@@ -744,10 +799,22 @@ function parseProvider(arg: string): "anthropic" | "openai" | "gemini" | null {
   if (normalized === "gemini" || normalized === "google") {
     return "gemini"
   }
+  if (normalized === "antigravity" || normalized === "ag") {
+    return "antigravity"
+  }
   return null
 }
 
-function createProvider(providerId: "anthropic" | "openai" | "gemini") {
+function getAntigravityConfig() {
+  const baseUrl = (
+    process.env.ANTIGRAVITY_BASE_URL || "http://127.0.0.1:8045"
+  ).replace(/\/+$/, "")
+  const apiKey = process.env.ANTIGRAVITY_API_KEY || "sk-antigravity"
+  const model = process.env.ANTIGRAVITY_MODEL || "gemini-3-flash"
+  return { baseUrl, apiKey, model }
+}
+
+function createProvider(providerId: "anthropic" | "openai" | "gemini" | "antigravity") {
   if (providerId === "anthropic") {
     return new AnthropicProvider()
   }
@@ -755,6 +822,13 @@ function createProvider(providerId: "anthropic" | "openai" | "gemini") {
     return new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
       baseUrl: process.env.GEMINI_BASE_URL,
+    })
+  }
+  if (providerId === "antigravity") {
+    const config = getAntigravityConfig()
+    return new OpenAIProvider({
+      apiKey: config.apiKey,
+      baseUrl: `${config.baseUrl}/v1`,
     })
   }
   return new OpenAIProvider({
