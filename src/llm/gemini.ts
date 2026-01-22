@@ -12,6 +12,7 @@ import type {
 } from "../types/provider"
 import type { ContentBlock, StopReason, StreamEvent, UsageInfo } from "../types/core"
 import type { ToolDefinition } from "../types/tool"
+import { fetchWithRetry, type RetryOptions } from "../utils/retry"
 
 type GeminiPart =
   | { text: string }
@@ -73,6 +74,8 @@ export interface GeminiProviderConfig {
   baseUrl?: string
   /** Default max tokens */
   defaultMaxTokens?: number
+  /** Retry configuration for API requests */
+  retry?: RetryOptions
 }
 
 /**
@@ -86,7 +89,9 @@ export class GeminiProvider implements LLMProvider {
   readonly name = "Gemini"
   readonly supportedModels = [/^gemini-/, /^models\/gemini-/]
 
-  private config: Required<Pick<GeminiProviderConfig, "apiKey" | "baseUrl" | "defaultMaxTokens">>
+  private config: Required<Pick<GeminiProviderConfig, "apiKey" | "baseUrl" | "defaultMaxTokens">> &
+    Pick<GeminiProviderConfig, "retry">
+  private defaultRetryOptions: RetryOptions
 
   constructor(config: GeminiProviderConfig = {}) {
     const apiKey = config.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
@@ -100,6 +105,16 @@ export class GeminiProvider implements LLMProvider {
       apiKey,
       baseUrl: config.baseUrl ?? process.env.GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta",
       defaultMaxTokens: config.defaultMaxTokens ?? 4096,
+      retry: config.retry,
+    }
+
+    // Default retry options (can be overridden per request)
+    this.defaultRetryOptions = {
+      maxAttempts: 3,
+      initialDelay: 1000,
+      maxDelay: 30000,
+      backoffMultiplier: 2,
+      jitter: true,
     }
   }
 
@@ -110,18 +125,18 @@ export class GeminiProvider implements LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const geminiRequest = this.buildRequest(request)
     const url = this.buildUrl(this.getModelPath(request.config.model) + ":generateContent")
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(geminiRequest),
-      signal: request.abortSignal,
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`Gemini API error: ${response.status} ${error}`)
-    }
+    const response = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(geminiRequest),
+        signal: request.abortSignal,
+      },
+      retryOptions
+    )
 
     const data = (await response.json()) as GeminiResponse
     return this.convertResponse(data, request.config.model)
@@ -132,18 +147,18 @@ export class GeminiProvider implements LLMProvider {
     const url = this.buildUrl(this.getModelPath(request.config.model) + ":streamGenerateContent", {
       alt: "sse",
     })
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(geminiRequest),
-      signal: request.abortSignal,
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`Gemini API error: ${response.status} ${error}`)
-    }
+    const response = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(geminiRequest),
+        signal: request.abortSignal,
+      },
+      retryOptions
+    )
 
     const contentType = response.headers.get("content-type") ?? ""
     if (!contentType.includes("text/event-stream")) {

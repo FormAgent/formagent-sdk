@@ -37,3 +37,7 @@ export type { EventMap, SessionEventMap, AgentEventMap } from "./events"
 
 // Environment utilities
 export { loadEnvOverride, getProviderEnv } from "./env"
+
+// Retry utilities
+export { withRetry, fetchWithRetry, getRetryOptionsFromEnv } from "./retry"
+export type { RetryOptions } from "./retry"

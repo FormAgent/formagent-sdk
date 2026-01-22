@@ -18,6 +18,7 @@ import type {
   StopReason,
 } from "../types/core"
 import type { ToolDefinition } from "../types/tool"
+import { fetchWithRetry, type RetryOptions } from "../utils/retry"
 
 type OpenAIResponsesInputItem =
   | { role: "system" | "developer"; content: string }
@@ -71,6 +72,8 @@ export interface OpenAICompatibleConfig {
   organization?: string
   /** Default max tokens */
   defaultMaxTokens?: number
+  /** Retry configuration for API requests */
+  retry?: RetryOptions
 }
 
 /**
@@ -101,7 +104,9 @@ export class OpenAIProvider implements LLMProvider {
     /^chatgpt/,
   ]
 
-  private config: Required<Pick<OpenAICompatibleConfig, "apiKey" | "baseUrl" | "defaultMaxTokens">> & Pick<OpenAICompatibleConfig, "organization">
+  private config: Required<Pick<OpenAICompatibleConfig, "apiKey" | "baseUrl" | "defaultMaxTokens">> &
+    Pick<OpenAICompatibleConfig, "organization" | "retry">
+  private defaultRetryOptions: RetryOptions
 
   constructor(config: OpenAICompatibleConfig = {}) {
     const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY
@@ -118,6 +123,16 @@ export class OpenAIProvider implements LLMProvider {
       ),
       organization: config.organization,
       defaultMaxTokens: config.defaultMaxTokens ?? 4096,
+      retry: config.retry,
+    }
+
+    // Default retry options (can be overridden per request)
+    this.defaultRetryOptions = {
+      maxAttempts: 3,
+      initialDelay: 1000,
+      maxDelay: 30000,
+      backoffMultiplier: 2,
+      jitter: true,
     }
   }
 
@@ -126,20 +141,21 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
+
     if (this.usesResponsesApi(request.config.model)) {
       const openaiRequest = this.buildResponsesRequest(request, false)
 
-      const response = await fetch(`${this.config.baseUrl}/responses`, {
-        method: "POST",
-        headers: this.getHeaders(),
-        body: JSON.stringify(openaiRequest),
-        signal: request.abortSignal,
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        throw new Error(`OpenAI API error: ${response.status} ${error}`)
-      }
+      const response = await fetchWithRetry(
+        `${this.config.baseUrl}/responses`,
+        {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify(openaiRequest),
+          signal: request.abortSignal,
+        },
+        retryOptions
+      )
 
       const data = (await response.json()) as OpenAIResponsesResponse
       return this.convertResponsesResponse(data)
@@ -147,89 +163,93 @@ export class OpenAIProvider implements LLMProvider {
 
     const openaiRequest = this.buildRequest(request, false)
 
-    let response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(openaiRequest),
-      signal: request.abortSignal,
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      if (this.shouldFallbackToResponses(response.status, error)) {
-        const fallbackRequest = this.buildResponsesRequest(request, false)
-        response = await fetch(`${this.config.baseUrl}/responses`, {
-          method: "POST",
-          headers: this.getHeaders(),
-          body: JSON.stringify(fallbackRequest),
-          signal: request.abortSignal,
-        })
-
-        if (!response.ok) {
-          const fallbackError = await response.text()
-          throw new Error(`OpenAI API error: ${response.status} ${fallbackError}`)
-        }
-
-        const data = (await response.json()) as OpenAIResponsesResponse
-        return this.convertResponsesResponse(data)
-      }
-
-      throw new Error(`OpenAI API error: ${response.status} ${error}`)
-    }
-
-    const data = (await response.json()) as OpenAIResponse
-
-    return this.convertResponse(data)
-  }
-
-  async stream(request: LLMRequest, options?: StreamOptions): Promise<LLMStreamResponse> {
-    if (this.usesResponsesApi(request.config.model)) {
-      const openaiRequest = this.buildResponsesRequest(request, true)
-
-      const response = await fetch(`${this.config.baseUrl}/responses`, {
+    const response = await fetchWithRetry(
+      `${this.config.baseUrl}/chat/completions`,
+      {
         method: "POST",
         headers: this.getHeaders(),
         body: JSON.stringify(openaiRequest),
         signal: request.abortSignal,
-      })
+      },
+      retryOptions
+    )
 
-      if (!response.ok) {
-        const error = await response.text()
-        throw new Error(`OpenAI API error: ${response.status} ${error}`)
+    // Check if we should fall back to responses API (404 only)
+    if (response.status === 404) {
+      const errorText = await response.clone().text()
+      if (this.shouldFallbackToResponses(404, errorText)) {
+        const fallbackRequest = this.buildResponsesRequest(request, false)
+        const fallbackResponse = await fetchWithRetry(
+          `${this.config.baseUrl}/responses`,
+          {
+            method: "POST",
+            headers: this.getHeaders(),
+            body: JSON.stringify(fallbackRequest),
+            signal: request.abortSignal,
+          },
+          retryOptions
+        )
+
+        const data = (await fallbackResponse.json()) as OpenAIResponsesResponse
+        return this.convertResponsesResponse(data)
       }
+    }
+
+    const data = (await response.json()) as OpenAIResponse
+    return this.convertResponse(data)
+  }
+
+  async stream(request: LLMRequest, options?: StreamOptions): Promise<LLMStreamResponse> {
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
+
+    if (this.usesResponsesApi(request.config.model)) {
+      const openaiRequest = this.buildResponsesRequest(request, true)
+
+      const response = await fetchWithRetry(
+        `${this.config.baseUrl}/responses`,
+        {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify(openaiRequest),
+          signal: request.abortSignal,
+        },
+        retryOptions
+      )
 
       return this.createResponsesStreamIterator(response.body!, options)
     }
 
     const openaiRequest = this.buildRequest(request, true)
 
-    let response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(openaiRequest),
-      signal: request.abortSignal,
-    })
+    const response = await fetchWithRetry(
+      `${this.config.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(openaiRequest),
+        signal: request.abortSignal,
+      },
+      retryOptions
+    )
 
-    if (!response.ok) {
-      const error = await response.text()
-      if (this.shouldFallbackToResponses(response.status, error)) {
+    // Check if we should fall back to responses API (404 only)
+    if (response.status === 404) {
+      const errorText = await response.clone().text()
+      if (this.shouldFallbackToResponses(404, errorText)) {
         const fallbackRequest = this.buildResponsesRequest(request, true)
-        response = await fetch(`${this.config.baseUrl}/responses`, {
-          method: "POST",
-          headers: this.getHeaders(),
-          body: JSON.stringify(fallbackRequest),
-          signal: request.abortSignal,
-        })
+        const fallbackResponse = await fetchWithRetry(
+          `${this.config.baseUrl}/responses`,
+          {
+            method: "POST",
+            headers: this.getHeaders(),
+            body: JSON.stringify(fallbackRequest),
+            signal: request.abortSignal,
+          },
+          retryOptions
+        )
 
-        if (!response.ok) {
-          const fallbackError = await response.text()
-          throw new Error(`OpenAI API error: ${response.status} ${fallbackError}`)
-        }
-
-        return this.createResponsesStreamIterator(response.body!, options)
+        return this.createResponsesStreamIterator(fallbackResponse.body!, options)
       }
-
-      throw new Error(`OpenAI API error: ${response.status} ${error}`)
     }
 
     return this.createStreamIterator(response.body!, options)

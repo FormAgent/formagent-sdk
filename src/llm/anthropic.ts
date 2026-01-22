@@ -19,6 +19,7 @@ import type {
   StopReason,
 } from "../types/core"
 import type { ToolDefinition } from "../types/tool"
+import { fetchWithRetry, type RetryOptions } from "../utils/retry"
 
 /**
  * Anthropic provider configuration
@@ -32,6 +33,8 @@ export interface AnthropicProviderConfig {
   apiVersion?: string
   /** Default max tokens */
   defaultMaxTokens?: number
+  /** Retry configuration for API requests */
+  retry?: RetryOptions
 }
 
 /**
@@ -62,7 +65,9 @@ export class AnthropicProvider implements LLMProvider {
     /^claude-instant/,
   ]
 
-  private config: Required<Pick<AnthropicProviderConfig, "apiKey" | "baseUrl" | "apiVersion" | "defaultMaxTokens">>
+  private config: Required<Pick<AnthropicProviderConfig, "apiKey" | "baseUrl" | "apiVersion" | "defaultMaxTokens">> &
+    Pick<AnthropicProviderConfig, "retry">
+  private defaultRetryOptions: RetryOptions
 
   constructor(config: AnthropicProviderConfig = {}) {
     const apiKey = config.apiKey ?? process.env.ANTHROPIC_API_KEY
@@ -77,6 +82,16 @@ export class AnthropicProvider implements LLMProvider {
       baseUrl: config.baseUrl ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
       apiVersion: config.apiVersion ?? "2023-06-01",
       defaultMaxTokens: config.defaultMaxTokens ?? 4096,
+      retry: config.retry,
+    }
+
+    // Default retry options (can be overridden per request)
+    this.defaultRetryOptions = {
+      maxAttempts: 3,
+      initialDelay: 1000,
+      maxDelay: 30000,
+      backoffMultiplier: 2,
+      jitter: true,
     }
   }
 
@@ -86,38 +101,37 @@ export class AnthropicProvider implements LLMProvider {
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const anthropicRequest = this.buildRequest(request, false)
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
 
-    const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(anthropicRequest),
-      signal: request.abortSignal,
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`Anthropic API error: ${response.status} ${error}`)
-    }
+    const response = await fetchWithRetry(
+      `${this.config.baseUrl}/v1/messages`,
+      {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(anthropicRequest),
+        signal: request.abortSignal,
+      },
+      retryOptions
+    )
 
     const data = (await response.json()) as AnthropicResponse
-
     return this.convertResponse(data)
   }
 
   async stream(request: LLMRequest, options?: StreamOptions): Promise<LLMStreamResponse> {
     const anthropicRequest = this.buildRequest(request, true)
+    const retryOptions = this.config.retry ?? this.defaultRetryOptions
 
-    const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(anthropicRequest),
-      signal: request.abortSignal,
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`Anthropic API error: ${response.status} ${error}`)
-    }
+    const response = await fetchWithRetry(
+      `${this.config.baseUrl}/v1/messages`,
+      {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(anthropicRequest),
+        signal: request.abortSignal,
+      },
+      retryOptions
+    )
 
     return this.createStreamIterator(response.body!, options)
   }
